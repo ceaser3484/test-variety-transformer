@@ -11,6 +11,7 @@ from torch.nn.functional import pad
 import yaml
 from linformer import LinformerLM
 from tqdm import tqdm
+import os
 
 
 def create_vocab(data) -> iter:
@@ -67,8 +68,8 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
 
     for epoch in range(num_epochs):
         loss_list = []
-        pbar = tqdm(dataLoader)
         print(f"\nIn {epoch + 1}, learning rate is ", scheduler.get_last_lr())
+        pbar = tqdm(dataLoader)
 
         for question, answer in pbar:
             pbar.set_description(f"{fold_idx} fold | {epoch + 1} epoch")
@@ -87,7 +88,7 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
             pbar.set_postfix({'loss': loss.item()})
             loss_list.append(loss.item())
 
-        print(f"In this epoch", '.' * 10)
+        print(f"\nIn this epoch", '.' * 10)
         loss_list = sorted(loss_list)
         median_idx = len(loss_list) // 2
         print(f"minimum loss is {loss_list[0]}\n"
@@ -117,7 +118,7 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
             pbar.set_postfix({'loss': loss.item()})
             loss_list.append(loss.item())
 
-        print(f"In this fold", '.' * 10)
+        print(f"\nIn this fold", '.' * 10)
         loss_list = sorted(loss_list)
         median_idx = len(loss_list) // 2
         print(f"minimum loss is {loss_list[0]}\n"
@@ -149,8 +150,12 @@ def train_main() -> None:
 
     pre_train_data = pre_train_data.values
     # get vocab
-    vocab = build_vocab_from_iterator(create_vocab(pre_train_data), specials=['<pad>', '<eos>'])
-    vocab = update_vocab(vocab)
+    if not os.path.isfile("../../pickles/vocab.pt"):
+        vocab = build_vocab_from_iterator(create_vocab(pre_train_data), specials=['<pad>', '<eos>'])
+        vocab = update_vocab(vocab)
+        torch.save(vocab, "../../pickles/vocab.pt")
+    else:
+        vocab = torch.load("../../pickles/vocab.pt")
 
     with open("hyper-parameter.yaml") as f:
         hyper_parameter = yaml.full_load(f)
@@ -185,6 +190,8 @@ def train_main() -> None:
         training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, hyper_parameter['num_epochs'], scheduler)
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
 
+        if fold_idx // 2 == 0:
+            torch.save(model.state_dict(), "../../models/linformer.pth")
 
     # for question, answer in dataLoader:
     #     print(question)
