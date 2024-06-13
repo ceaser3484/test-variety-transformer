@@ -1,6 +1,8 @@
-batch_size: 16
-learning_rate: 0.0001
+batch_size: 8 
+learning_rate: 0.000001
 max_len: 800
 num_fold: 5
 shuffle: True
 num_epochs: 15
+scheduler_step_size: 5
+scheduler_gamma: 0.2

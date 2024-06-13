@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn.functional import pad
 import yaml
-from linformer import LinformerLM
+from performer_pytorch import PerformerLM
 from tqdm import tqdm
 import os
 
@@ -76,8 +76,9 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
             optimizer.zero_grad()
             question = question.to(device)
             answer = answer.to(device)
+            mask = torch.ones_like(question).bool().to(device)
 
-            predict = model(question)
+            predict = model(question, mask=mask)
             num_token = predict.size(2)
             predict = predict.view(-1, num_token)
             answer = answer.reshape(-1)
@@ -162,15 +163,14 @@ def train_main() -> None:
 
     collate_fn = make_collate_fn(hyper_parameter['max_len'])
     batch_size = hyper_parameter['batch_size']
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # device = 'cpu'
+    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cpu'
 
-    model = LinformerLM(num_tokens=len(vocab),
-                        dim=384,
-                        seq_len=hyper_parameter['max_len'],
-                        depth=12,
-                        dropout=0.1
-                        ).to(device)
+    model = PerformerLM(num_tokens=len(vocab),
+                        max_seq_len=hyper_parameter['max_len'],
+                        dim=512, depth=12, heads=8).to(device)
+
+    model = torch.quantization.quantize_dynamic(model, dtype=torch.qint8).to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
     optimizer = torch.optim.Adam(model.parameters(), lr=hyper_parameter['learning_rate'])
@@ -193,7 +193,7 @@ def train_main() -> None:
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
 
         if fold_idx // 2 == 0:
-            torch.save(model.state_dict(), "../../models/linformer.pth")
+            torch.save(model.state_dict(), "../../models/performer.pth")
 
     # for question, answer in dataLoader:
     #     print(question)
