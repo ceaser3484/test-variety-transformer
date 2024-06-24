@@ -1,6 +1,9 @@
 import pandas as pd
 import torch
 import torch.nn as nn
+from torchtext import disable_torchtext_deprecation_warning
+disable_torchtext_deprecation_warning()
+
 from torchtext.vocab import build_vocab_from_iterator
 from mecab import MeCab
 from sklearn.model_selection import KFold
@@ -12,6 +15,7 @@ import yaml
 from performer_pytorch import PerformerLM
 from tqdm import tqdm
 import os
+
 
 
 def create_vocab(data) -> iter:
@@ -86,16 +90,18 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
             loss = criterion(predict, answer)
             loss.backward()
             optimizer.step()
-            pbar.set_postfix({'loss': loss.item()})
+            pbar.set_postfix({'loss': loss.item(), 'lr': scheduler.get_lr()})
             loss_list.append(loss.item())
+            scheduler.step()
 
         print(f"\nIn this epoch", '.' * 10)
         loss_list = sorted(loss_list)
         median_idx = len(loss_list) // 2
-        print(f"minimum loss is {loss_list[0]}\n"
+        print(f"average loss is {sum(loss_list)/len(loss_list)}\n\n"
+              f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
-        scheduler.step()
+
 
 
 def valadation_loop(dataLoader, model, criterion, device, fold_idx):
@@ -122,7 +128,8 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
         print(f"\nIn this fold", '.' * 10)
         loss_list = sorted(loss_list)
         median_idx = len(loss_list) // 2
-        print(f"minimum loss is {loss_list[0]}\n"
+        print(f"average loss is {sum(loss_list) / len(loss_list)}\n\n"
+              f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
 
@@ -163,19 +170,26 @@ def train_main() -> None:
 
     collate_fn = make_collate_fn(hyper_parameter['max_len'])
     batch_size = hyper_parameter['batch_size']
-    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # device = 'cpu'
 
     model = PerformerLM(num_tokens=len(vocab),
                         max_seq_len=hyper_parameter['max_len'],
-                        dim=512, depth=12, heads=8).to(device)
+                        dim=1024, depth=3, heads=8).to(device)
 
-    model = torch.quantization.quantize_dynamic(model, dtype=torch.qint8).to(device)
+    # model = torch.quantization.quantize_dynamic(model, dtype=torch.qint8).to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
-    optimizer = torch.optim.Adam(model.parameters(), lr=hyper_parameter['learning_rate'])
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
-                                                gamma=hyper_parameter['scheduler_gamma'])
+    optimizer = torch.optim.RAdam(model.parameters(), lr=hyper_parameter['learning_rate'])
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
+    #                                             gamma=hyper_parameter['scheduler_gamma'])
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.000005, max_lr=hyper_parameter['learning_rate'])
+
+    if os.path.isfile("../../models/performer.pth"):
+        check_point = torch.load("../../models/performer.pth")
+        model.load_state_dict(check_point['model_state'])
+        optimizer.load_state_dict(check_point['optimizer_state'])
+        scheduler.load_state_dict(check_point['scheduler_state'])
 
     kfold = KFold(n_splits=hyper_parameter['num_fold'])
 
@@ -193,7 +207,10 @@ def train_main() -> None:
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
 
         if fold_idx // 2 == 0:
-            torch.save(model.state_dict(), "../../models/performer.pth")
+            torch.save({"model_state": model.state_dict(),
+                        "optimizer_state": optimizer.state_dict(),
+                        "scheduler_state": scheduler.state_dict()}, "../../models/performer.pth")
+            print("model is saving\n")
 
     # for question, answer in dataLoader:
     #     print(question)

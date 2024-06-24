@@ -1,3 +1,6 @@
+# from torchtext import disable_torchtext_deprecation_warning
+# disable_torchtext_deprecation_warning()
+
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -85,16 +88,18 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
             loss = criterion(predict, answer)
             loss.backward()
             optimizer.step()
-            pbar.set_postfix({'loss': loss.item()})
+            pbar.set_postfix({'loss': loss.item(), 'lr':f"{scheduler.get_last_lr()[0]:5f}"})
             loss_list.append(loss.item())
+            scheduler.step()
 
         print(f"\nIn this epoch", '.' * 10)
         loss_list = sorted(loss_list)
         median_idx = len(loss_list) // 2
-        print(f"minimum loss is {loss_list[0]}\n"
+        print(f"average loss is {sum(loss_list) / len(loss_list)}\n\n"
+              f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
-        scheduler.step()
+        # scheduler.step()
 
 
 def valadation_loop(dataLoader, model, criterion, device, fold_idx):
@@ -121,7 +126,8 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
         print(f"\nIn this fold", '.' * 10)
         loss_list = sorted(loss_list)
         median_idx = len(loss_list) // 2
-        print(f"minimum loss is {loss_list[0]}\n"
+        print(f"average loss is {sum(loss_list) / len(loss_list)}\n\n"
+              f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
 
@@ -166,16 +172,26 @@ def train_main() -> None:
     # device = 'cpu'
 
     model = LinformerLM(num_tokens=len(vocab),
-                        dim=384,
+                        dim=512,
                         seq_len=hyper_parameter['max_len'],
-                        depth=12,
+                        heads=128,
+                        depth=1,
+                        dim_head=16,
+                        k=256,
                         dropout=0.1
                         ).to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
     optimizer = torch.optim.Adam(model.parameters(), lr=hyper_parameter['learning_rate'])
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
-                                                gamma=hyper_parameter['scheduler_gamma'])
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
+    #                                             gamma=hyper_parameter['scheduler_gamma'])
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.000001, max_lr=hyper_parameter['learning_rate'])
+
+    if os.path.isfile("../../models/linformer.pth"):
+        check_point = torch.load("../../models/linformer.pth")
+        model = model.load_state_dict(check_point['model_state'])
+        optimizer = optimizer.load_state_dict(check_point['optimizer_state'])
+        scheduler = scheduler.load_state_dict(check_point['scheduler_state'])
 
     kfold = KFold(n_splits=hyper_parameter['num_fold'])
 
@@ -191,9 +207,13 @@ def train_main() -> None:
 
         training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, hyper_parameter['num_epochs'], scheduler)
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
+        # exit()
 
         if fold_idx // 2 == 0:
-            torch.save(model.state_dict(), "../../models/linformer.pth")
+            torch.save({"model_state": model.state_dict(),
+                        "optimizer_state": optimizer.state_dict(),
+                        "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
+            print("model is saving\n")
 
     # for question, answer in dataLoader:
     #     print(question)
