@@ -1,42 +1,35 @@
-# from torchtext import disable_torchtext_deprecation_warning
-# disable_torchtext_deprecation_warning()
-
 import pandas as pd
 import torch
 import torch.nn as nn
 from torchtext.vocab import build_vocab_from_iterator
-from mecab import MeCab
 from sklearn.model_selection import KFold
-from Dataset import SentenceDataset
+import spacy
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn.functional import pad
 import yaml
-from linformer import LinformerLM
+from model import Transformer
 from tqdm import tqdm
 import os
+import numpy as np
+from Dataset import TranslationDataset
 
 
-def create_vocab(data) -> iter:
-    mecab = MeCab()
-    for column in data:
-        for sentence in column:
-            yield mecab.morphs(sentence)
+
+def create_eng_vocab(data) -> iter:
+    eng_spacy = spacy.load("en_core_web_sm")
+    pbar = tqdm(data)
+    for sentence in pbar:
+        sentence = sentence.lower()
+        yield [word.text for word in eng_spacy(sentence)]
 
 
-def update_vocab(vocab) -> iter:
-    test_data = pd.read_csv("~/DATASET/mapping_data/test.csv")
-    mecab = MeCab()
-    test_data.drop('id', axis=1, inplace=True)
-    test_data = test_data.values
-    test_data = test_data.squeeze(1)
-
-    for sentence in test_data:
-        for word in mecab.morphs(sentence):
-            if not vocab.__contains__(word):
-                vocab.append_token(word)
-
-    return vocab
+def create_ger_vocab(data) -> iter:
+    ger_spacy = spacy.load("de_core_news_sm")
+    pbar = tqdm(data)
+    for sentence in pbar:
+        sentence = sentence.lower()
+        yield [word.text for word in ger_spacy(sentence)]
 
 
 def make_collate_fn(max_len):
@@ -132,36 +125,23 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
               f"maximum loss is {loss_list[-1]}\n")
 
 def train_main() -> None:
-    chat_data = pd.read_csv("~/DATASET/mapping_data/train.csv")
-    chat_data.drop(['id', 'category'], axis=1, inplace=True)
+    chat_data = pd.read_csv("~/DATASET/deu.txt", sep='\t').values
+    # chat_data.drop(['id', 'category'], axis=1, inplace=True)
+    chat_data = np.delete(chat_data, 2, axis=1)
 
-    pre_train_data = pd.DataFrame()
-    for q_idx in range(2):
-        # training data's question column index
-        question_idx = q_idx + 1
-
-        # set temporary DataFrame
-        temp_dataframe = pd.DataFrame()
-
-        for ans_idx in range(5):
-            # training data's answer column index
-            answer_idx = ans_idx + 1
-            temp_dataframe['question'] = chat_data[f"질문_{question_idx}"]
-            temp_dataframe['answer'] = chat_data[f'답변_{answer_idx}']
-
-            # concatenate
-            pre_train_data = pd.concat([pre_train_data, temp_dataframe])
-
-    del chat_data
-
-    pre_train_data = pre_train_data.values
     # get vocab
-    if not os.path.isfile("../../pickles/vocab.pt"):
-        vocab = build_vocab_from_iterator(create_vocab(pre_train_data), specials=['<pad>', '<eos>'])
-        vocab = update_vocab(vocab)
-        torch.save(vocab, "../../pickles/vocab.pt")
+    if os.path.isfile("../../pickles/eng_vocab.pt") and os.path.isfile("../../pickles/ger_vocab.pt"):
+        print("saved vocab is existed")
+        eng_vocab = torch.load("../../pickles/eng_vocab.pt")
+        ger_vocab = torch.load("../../pickles/ger_vocab.pt")
+
     else:
-        vocab = torch.load("../../pickles/vocab.pt")
+
+        eng_vocab = build_vocab_from_iterator(iterator=create_eng_vocab(chat_data[:, 0].tolist()),
+                                              specials=['<pad>', '<eos>'])
+        ger_vocab = build_vocab_from_iterator(create_ger_vocab(chat_data[:, 1].tolist()), specials=['<pad>', '<eos>'])
+        torch.save(eng_vocab, "../../pickles/eng_vocab.pt")
+        torch.save(ger_vocab, "../../pickles/ger_vocab.pt")
 
     with open("hyper-parameter.yaml") as f:
         hyper_parameter = yaml.full_load(f)
@@ -171,23 +151,30 @@ def train_main() -> None:
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # device = 'cpu'
 
-    model = LinformerLM(num_tokens=len(vocab),
-                        dim=512,
-                        seq_len=hyper_parameter['max_len'],
-                        heads=256,
-                        depth=1,
-                        dim_head=4,
-                        k=256,
-                        dropout=0.1
+    model = Transformer(src_vocab_size=len(eng_vocab),
+                        trg_vocab_size=len(ger_vocab),
+                        max_len=hyper_parameter['max_len'],
+                        hidden_dim=64,
+                        n_heads=8,
+                        n_stack=2,
+                        src_pad_idx=eng_vocab['<pad>'],
+                        trg_pad_idx=ger_vocab['<pad>'],
+                        dropout=0.1,
+                        device=device
                         ).to(device)
 
-    criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
+    eng_spacy = spacy.load("en_core_web_sm")
+    ger_spacy = spacy.load("de_core_news_sm")
+
+    # dataset = TranslationDataset(chat_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
+
+    criterion = nn.CrossEntropyLoss(ignore_index=ger_vocab['<pad>'])
     optimizer = torch.optim.Adam(model.parameters(), lr=hyper_parameter['learning_rate'])
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
     #                                             gamma=hyper_parameter['scheduler_gamma'])
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.000001, max_lr=hyper_parameter['learning_rate'])
 
-    if os.path.isfile("../../models/linformer.pth"):
+    if os.path.isfile("../../models/transformer.pth"):
         check_point = torch.load("../../models/linformer.pth")
         model = model.load_state_dict(check_point['model_state'])
         optimizer = optimizer.load_state_dict(check_point['optimizer_state'])
@@ -196,23 +183,22 @@ def train_main() -> None:
     kfold = KFold(n_splits=hyper_parameter['num_fold'])
 
     for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(pre_train_data)):
-        train_data = pre_train_data[train_idx]
-        val_data = pre_train_data[val_idx]
+        train_data = chat_data[train_idx]
+        val_data = chat_data[val_idx]
 
-        train_dataset = SentenceDataset(train_data, vocab)
-        val_dataset = SentenceDataset(val_data, vocab)
+        train_dataset = TranslationDataset(train_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
+        val_dataset = TranslationDataset(val_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
 
         train_dataLoader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'], collate_fn=collate_fn)
         val_dataLoader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
         training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, hyper_parameter['num_epochs'], scheduler)
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
-        # exit()
 
         if fold_idx // 2 == 0:
             torch.save({"model_state": model.state_dict(),
                         "optimizer_state": optimizer.state_dict(),
-                        "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
+                        "scheduler_state": scheduler.state_dict()}, "../../models/transfomer.pth")
             print("model is saving\n")
 
     # for question, answer in dataLoader:
@@ -220,6 +206,5 @@ def train_main() -> None:
     #     print(answer)
 
 
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     train_main()
