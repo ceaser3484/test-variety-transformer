@@ -29,6 +29,6 @@ class TranslationDataset(Dataset):
 
     def ger_to_tokens(self, sentence):
         sentence = sentence.lower()
-        ger_tokens = [self.ger_vocab[word.text] for word in self.ger_spacy(sentence)] + [self.ger_vocab['<eos>']]
-
-        return ger_tokens
+        ger_tokens_input = [self.ger_vocab['<sos>']] + [self.ger_vocab[word.text] for word in self.ger_spacy(sentence)]
+        ger_token_expect = [self.ger_vocab[word.text] for word in self.ger_spacy(sentence)] + [self.ger_vocab['<eos>']]
+        return ger_tokens_input, ger_token_expect

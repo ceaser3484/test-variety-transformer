@@ -15,7 +15,7 @@ class PositionalEncoding(nn.Module):
 
         _2i = torch.arange(0, d_model, step=2, device=device).float()
 
-        self.encodding[:, 0::2] = torch.sin(pos / (10000) ** (_2i / d_model))
+        self.encodding[:, 0::2] = torch.sin(pos / (10000 ** (_2i / d_model)))
         self.encodding[:, 1::2] = torch.cos(pos / (10000 ** (_2i / d_model)))
         # print(self.encodding)
 

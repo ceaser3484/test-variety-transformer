@@ -34,27 +34,29 @@ def create_ger_vocab(data) -> iter:
 
 def make_collate_fn(max_len):
     def collate_fn(batch):
-        question_list = []
-        answer_list = []
+        eng_list = []
+        ger_input_list = []
+        ger_expect_list = []
+        for eng, (ger_input, ger_expect) in batch:
+            eng_list.append(torch.tensor(eng))
+            ger_input_list.append(torch.tensor(ger_input))
+            ger_expect_list.append(torch.tensor(ger_expect))
 
-        for question, answer in batch:
-            question_list.append(torch.tensor(question))
-            answer_list.append(torch.tensor(answer))
-
-        num_questions = len(question_list)
-        temp = question_list + answer_list
-        temp = pad_sequence(temp)
+        batch = len(eng_list)
+        temp = eng_list + ger_input_list + ger_expect_list
+        temp = pad_sequence(temp, batch_first=True)
 
         # sequence's length is made longer to max_len
-        seq_length = temp.size(0)
+        seq_length = temp.size(1)
         if seq_length < max_len:
             needed_seq_length = max_len - seq_length
-            temp = pad(temp, (0, 0, 0, needed_seq_length), 'constant', 0)
+            temp = pad(temp, (0, needed_seq_length, 0, 0), 'constant', 0)
 
-        question_tensors = temp[:, :num_questions]
-        answer_tensors = temp[:, num_questions:]
+        eng_tensors = temp[:batch, :]
+        ger_input_tensors = temp[batch:batch * 2, :]
+        ger_expect_tensors = temp[batch * 2:, :]
 
-        return question_tensors, answer_tensors
+        return eng_tensors, ger_input_tensors, ger_expect_tensors
 
     return collate_fn
 
@@ -67,18 +69,19 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
         print(f"\nIn {epoch + 1}, learning rate is ", scheduler.get_last_lr())
         pbar = tqdm(dataLoader)
 
-        for question, answer in pbar:
+        for eng, ger_input, ger_expect in pbar:
             pbar.set_description(f"{fold_idx} fold | {epoch + 1} epoch")
             optimizer.zero_grad()
-            question = question.to(device)
-            answer = answer.to(device)
+            eng = eng.to(device)
+            ger_input = ger_input.to(device)
+            ger_expect = ger_expect.to(device)
 
-            predict = model(question)
+            predict = model(eng, ger_input)
             num_token = predict.size(2)
             predict = predict.view(-1, num_token)
-            answer = answer.reshape(-1)
+            ger_expect = ger_expect.reshape(-1)
 
-            loss = criterion(predict, answer)
+            loss = criterion(predict, ger_expect)
             loss.backward()
             optimizer.step()
             pbar.set_postfix({'loss': loss.item(), 'lr':f"{scheduler.get_last_lr()[0]:5f}"})
@@ -99,20 +102,21 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
     model.eval()
     pbar = tqdm(dataLoader)
     loss_list = []
+
     with torch.no_grad():
-        for question, answer in pbar:
-
+        for eng, ger_input, ger_expect in pbar:
             pbar.set_description(f"{fold_idx} fold evaluation")
+            eng = eng.to(device)
+            ger_input = ger_input.to(device)
+            ger_expect = ger_expect.to(device)
 
-            question = question.to(device)
-            answer = answer.to(device)
+            predict = model(eng, ger_input)
+            num_token = predict.size(2)
+            predict = predict.view(-1, num_token)
+            ger_expect = ger_expect.reshape(-1)
 
-            predicted = model(question)
-            num_token = predicted.size(2)
-            predicted = predicted.view(-1, num_token)
-            answer = answer.reshape(-1)
+            loss = criterion(predict, ger_expect)
 
-            loss = criterion(predicted, answer)
             pbar.set_postfix({'loss': loss.item()})
             loss_list.append(loss.item())
 
@@ -139,7 +143,8 @@ def train_main() -> None:
 
         eng_vocab = build_vocab_from_iterator(iterator=create_eng_vocab(chat_data[:, 0].tolist()),
                                               specials=['<pad>', '<eos>'])
-        ger_vocab = build_vocab_from_iterator(create_ger_vocab(chat_data[:, 1].tolist()), specials=['<pad>', '<eos>'])
+        ger_vocab = build_vocab_from_iterator(create_ger_vocab(chat_data[:, 1].tolist()),
+                                              specials=['<pad>', '<sos>', '<eos>'])
         torch.save(eng_vocab, "../../pickles/eng_vocab.pt")
         torch.save(ger_vocab, "../../pickles/ger_vocab.pt")
 
@@ -156,7 +161,7 @@ def train_main() -> None:
                         max_len=hyper_parameter['max_len'],
                         hidden_dim=64,
                         n_heads=8,
-                        n_stack=2,
+                        n_stack=5,
                         src_pad_idx=eng_vocab['<pad>'],
                         trg_pad_idx=ger_vocab['<pad>'],
                         dropout=0.1,
@@ -165,8 +170,6 @@ def train_main() -> None:
 
     eng_spacy = spacy.load("en_core_web_sm")
     ger_spacy = spacy.load("de_core_news_sm")
-
-    # dataset = TranslationDataset(chat_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
 
     criterion = nn.CrossEntropyLoss(ignore_index=ger_vocab['<pad>'])
     optimizer = torch.optim.Adam(model.parameters(), lr=hyper_parameter['learning_rate'])
@@ -182,7 +185,7 @@ def train_main() -> None:
 
     kfold = KFold(n_splits=hyper_parameter['num_fold'])
 
-    for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(pre_train_data)):
+    for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(chat_data)):
         train_data = chat_data[train_idx]
         val_data = chat_data[val_idx]
 

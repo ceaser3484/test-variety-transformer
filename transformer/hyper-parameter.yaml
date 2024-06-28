@@ -1,5 +1,5 @@
-batch_size: 4
-learning_rate: 0.003
+batch_size: 64
+learning_rate: 0.004
 max_len: 120
 num_fold: 5
 shuffle: True
