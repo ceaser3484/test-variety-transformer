@@ -95,7 +95,12 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
               f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
-        # scheduler.step()
+
+        if epoch + 1 // 2 == 0:
+            torch.save({"model_state": model.state_dict(),
+                        "optimizer_state": optimizer.state_dict(),
+                        "scheduler_state": scheduler.state_dict()}, "../../models/transfomer.pth")
+            print("model is saving\n")
 
 
 def valadation_loop(dataLoader, model, criterion, device, fold_idx):
@@ -198,11 +203,11 @@ def train_main() -> None:
         training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, hyper_parameter['num_epochs'], scheduler)
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
 
-        if fold_idx // 2 == 0:
-            torch.save({"model_state": model.state_dict(),
-                        "optimizer_state": optimizer.state_dict(),
-                        "scheduler_state": scheduler.state_dict()}, "../../models/transfomer.pth")
-            print("model is saving\n")
+        # if fold_idx // 2 == 0:
+        #     torch.save({"model_state": model.state_dict(),
+        #                 "optimizer_state": optimizer.state_dict(),
+        #                 "scheduler_state": scheduler.state_dict()}, "../../models/transfomer.pth")
+        #     print("model is saving\n")
 
     # for question, answer in dataLoader:
     #     print(question)
