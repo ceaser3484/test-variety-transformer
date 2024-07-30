@@ -84,7 +84,7 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
             loss = criterion(predict, ger_expect)
             loss.backward()
             optimizer.step()
-            pbar.set_postfix({'loss': loss.item(), 'lr':f"{scheduler.get_last_lr()[0]:5f}"})
+            pbar.set_postfix({'loss': loss.item(), 'lr': f"{scheduler.get_last_lr()[0]:5f}"})
             loss_list.append(loss.item())
             scheduler.step()
 
@@ -96,10 +96,10 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
 
-        if epoch + 1 // 2 == 0:
+        if (epoch + 1) % 2 == 0:
             torch.save({"model_state": model.state_dict(),
                         "optimizer_state": optimizer.state_dict(),
-                        "scheduler_state": scheduler.state_dict()}, "../../models/transfomer.pth")
+                        "scheduler_state": scheduler.state_dict()}, "../../models/transformer.pth")
             print("model is saving\n")
 
 
@@ -132,6 +132,35 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
               f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
+def test_loop(testLoader, model, criterion, device, eng_vocab, ger_vocab):
+    model.eval()
+
+    with torch.no_grad():
+        for eng, ger_input, ger_expect in testLoader:
+            show_eng = eng.squeeze(0).tolist()
+            print(eng_vocab.lookup_tokens(show_eng))
+
+            show_ger_input = ger_input.squeeze(0).tolist()
+            print(ger_vocab.lookup_tokens(show_ger_input))
+
+            eng = eng.to(device)
+            ger_input = ger_input.to(device)
+            ger_expect = ger_expect.to(device)
+
+            predicted = model(eng, ger_input)
+            num_token = predicted.size(2)
+            predicted = predicted.view(-1, num_token)
+
+            ger_expect = ger_expect.reshape(-1)
+
+            loss = criterion(predicted, ger_expect)
+            print(f"In this sentence's loss is {loss.item()}\n"
+                  f"german sentence is below", '.' * 20)
+
+            predicted_sentence = torch.argmax(predicted, dim=1).tolist()
+            print(ger_vocab.lookup_tokens(predicted_sentence))
+
+
 
 def train_main() -> None:
     chat_data = pd.read_csv("~/DATASET/deu.txt", sep='\t').values
@@ -166,7 +195,7 @@ def train_main() -> None:
                         max_len=hyper_parameter['max_len'],
                         hidden_dim=64,
                         n_heads=8,
-                        n_stack=5,
+                        n_stack=6,
                         src_pad_idx=eng_vocab['<pad>'],
                         trg_pad_idx=ger_vocab['<pad>'],
                         dropout=0.1,
@@ -183,31 +212,40 @@ def train_main() -> None:
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.000001, max_lr=hyper_parameter['learning_rate'])
 
     if os.path.isfile("../../models/transformer.pth"):
-        check_point = torch.load("../../models/linformer.pth")
-        model = model.load_state_dict(check_point['model_state'])
-        optimizer = optimizer.load_state_dict(check_point['optimizer_state'])
-        scheduler = scheduler.load_state_dict(check_point['scheduler_state'])
+        check_point = torch.load("../../models/transformer.pth")
+        model.load_state_dict(check_point['model_state'])
+        optimizer.load_state_dict(check_point['optimizer_state'])
+        scheduler.load_state_dict(check_point['scheduler_state'])
+        print("saved file is found")
 
-    kfold = KFold(n_splits=hyper_parameter['num_fold'])
+
+    kfold = KFold(n_splits=hyper_parameter['num_fold'], shuffle=True)
 
     for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(chat_data)):
         train_data = chat_data[train_idx]
         val_data = chat_data[val_idx]
 
+        random_choice = np.random.choice(val_data.shape[0], 3)
+        test_data = chat_data[random_choice, :]
+
         train_dataset = TranslationDataset(train_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
         val_dataset = TranslationDataset(val_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
+        test_dataset = TranslationDataset(test_data, eng_vocab, ger_vocab, eng_spacy, ger_spacy)
 
-        train_dataLoader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'], collate_fn=collate_fn)
+        train_dataLoader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'], collate_fn=collate_fn, num_workers=4)
         val_dataLoader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+        test_dataLoader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
 
+        test_loop(test_dataLoader, model, criterion, device, eng_vocab, ger_vocab)
         training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, hyper_parameter['num_epochs'], scheduler)
         valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
+        test_loop(test_dataLoader,model, criterion, device, eng_vocab, ger_vocab)
 
-        # if fold_idx // 2 == 0:
-        #     torch.save({"model_state": model.state_dict(),
-        #                 "optimizer_state": optimizer.state_dict(),
-        #                 "scheduler_state": scheduler.state_dict()}, "../../models/transfomer.pth")
-        #     print("model is saving\n")
+        if (fold_idx + 1) % 2 == 0:
+            torch.save({"model_state": model.state_dict(),
+                        "optimizer_state": optimizer.state_dict(),
+                        "scheduler_state": scheduler.state_dict()}, "../../models/transformer.pth")
+            print("model is saving\n")
 
     # for question, answer in dataLoader:
     #     print(question)
