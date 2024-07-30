@@ -1,6 +1,4 @@
-# from torchtext import disable_torchtext_deprecation_warning
-# disable_torchtext_deprecation_warning()
-
+    
 import pandas as pd
 import torch
 import torch.nn as nn
