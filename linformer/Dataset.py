@@ -7,9 +7,11 @@ class SentenceDataset(Dataset):
 
     def __init__(self, data, vocab):
         super(SentenceDataset, self).__init__()
+        import glob
+        user_dict = glob.glob("../../mecab-dict/*.dic")
         self.data = data
         self.vocab = vocab
-        self.mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR)
+        self.mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
 
     def __len__(self):
         return self.data.shape[0]

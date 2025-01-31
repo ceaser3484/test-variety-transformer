@@ -1,5 +1,7 @@
     
 import pandas as pd
+import torchtext
+torchtext.disable_torchtext_deprecation_warning()
 import torch
 import torch.nn as nn
 from torchtext.vocab import build_vocab_from_iterator
@@ -15,10 +17,13 @@ import os
 from model import Linformer
 import numpy as np
 import openkorpos_dic
+import matplotlib.pyplot as plt
 
 
 def create_vocab(data) -> iter:
-    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR)
+    import glob
+    user_dict = glob.glob("../../mecab-dict/*.dic")
+    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
 
     for column in data:
         for sentence in column:
@@ -26,8 +31,11 @@ def create_vocab(data) -> iter:
 
 
 def update_vocab(vocab) -> iter:
+    import glob
+    user_dict = glob.glob("../../mecab-dict/*.dic")
+
     test_data = pd.read_csv("~/DATASET/mapping_data/test.csv")
-    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR)
+    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
     test_data.drop('id', axis=1, inplace=True)
     test_data = test_data.values
     test_data = test_data.squeeze(1)
@@ -67,49 +75,51 @@ def make_collate_fn(max_len):
     return collate_fn
 
 
-def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, num_epochs, scheduler):
+def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epoch, scheduler):
     model.train()
 
-    for epoch in range(num_epochs):
-        loss_list = []
-        print(f"\nIn {epoch + 1}, learning rate is ", scheduler.get_last_lr())
-        pbar = tqdm(dataLoader)
 
-        for question, answer in pbar:
-            pbar.set_description(f"{fold_idx} fold | {epoch + 1} epoch")
-            optimizer.zero_grad()
-            question = question.to(device)
-            answer = answer.to(device)
+    loss_list = []
+    print(f"\nIn {epoch + 1}, learning rate is ", scheduler.get_last_lr()[0])
+    pbar = tqdm(dataLoader, ascii=' =')
+    correct = 0
+    for idx, (question, answer) in enumerate(pbar):
+        pbar.set_description(f"{fold_idx} fold | {epoch + 1} epoch")
+        optimizer.zero_grad()
+        question = question.to(device)
+        answer = answer.to(device)
 
-            predict = model(question)
-            num_token = predict.size(2)
-            predict = predict.view(-1, num_token)
-            answer = answer.reshape(-1)
+        predict = model(question)
+        num_token = predict.size(2)
+        predict = predict.view(-1, num_token)
+        answer = answer.reshape(-1)
 
-            loss = criterion(predict, answer)
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=5)
-            optimizer.step()
-            pbar.set_postfix({'loss': loss.item(), 'lr':f"{scheduler.get_last_lr()[0]:5f}"})
-            loss_list.append(loss.item())
-            scheduler.step()
-
-
-        print(f"\nIn this epoch", '.' * 10)
-        loss_list = sorted(loss_list)
-        median_idx = len(loss_list) // 2
-        print(f"average loss is {sum(loss_list) / len(loss_list)}\n\n"
-              f"minimum loss is {loss_list[0]}\n"
-              f"median loss is {loss_list[median_idx]}\n"
-              f"maximum loss is {loss_list[-1]}\n")
-
-        if (epoch + 1) % 2 == 0:
-            torch.save({"model_state": model.state_dict(),
-                        "optimizer_state": optimizer.state_dict(),
-                        "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
-            print("model is saving\n")
+        loss = criterion(predict, answer)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=4)
+        optimizer.step()
+        # correct += (answer == torch.argmax(predict, dim=-1)).float().sum()
+        pbar.set_postfix({'loss': loss.item(),
+                          # 'acc': f"{100 * correct / len(predict)}" ,
+                          'lr':f"{scheduler.get_last_lr()[0]:10f}"})
+        loss_list.append(loss.item())
         # scheduler.step()
 
+    print(f"\nIn this epoch", '.' * 10)
+    loss_list = sorted(loss_list)
+    median_idx = len(loss_list) // 2
+    print(f"average loss is {sum(loss_list) / len(loss_list)}\n\n"
+          f"minimum loss is {loss_list[0]}\n"
+          f"median loss is {loss_list[median_idx]}\n"
+          f"maximum loss is {loss_list[-1]}\n")
+
+    if (epoch + 1) % 2 == 0:
+        torch.save({"model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
+        print("model is saving\n")
+    scheduler.step()
+    return sum(loss_list) / len(loss_list)
 
 def valadation_loop(dataLoader, model, criterion, device, fold_idx):
     model.eval()
@@ -139,6 +149,8 @@ def valadation_loop(dataLoader, model, criterion, device, fold_idx):
               f"minimum loss is {loss_list[0]}\n"
               f"median loss is {loss_list[median_idx]}\n"
               f"maximum loss is {loss_list[-1]}\n")
+    return sum(loss_list) / len(loss_list)
+
 
 def test_loop(testLoader, model, criterion, device, vocab):
     model.eval()
@@ -171,6 +183,7 @@ def test_loop(testLoader, model, criterion, device, vocab):
 def train_main() -> None:
     chat_data = pd.read_csv("~/DATASET/mapping_data/train.csv")
     chat_data.drop(['id', 'category'], axis=1, inplace=True)
+    # torch.manual_seed(156)
 
     pre_train_data = pd.DataFrame()
     for q_idx in range(2):
@@ -210,17 +223,21 @@ def train_main() -> None:
 
     model = Linformer(hyper_parameter, num_vocab=len(vocab), device=device).to(device)
     criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
-    optimizer = torch.optim.RAdam(model.parameters(), lr=hyper_parameter['learning_rate'])
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
-    #                                             gamma=hyper_parameter['scheduler_gamma'])
-    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.000001, max_lr=hyper_parameter['learning_rate'],
-                                                  step_size_up=hyper_parameter['step_size'])
+    # optimizer = torch.optim.Adam(model.parameters(), lr=hyper_parameter['learning_rate'])
+    # optimizer = torch.optim.RAdam(model.parameters(), lr=hyper_parameter['learning_rate'])
+    optimizer = torch.optim.AdamW(model.parameters(), lr=hyper_parameter['learning_rate'])
+    # optimizer = torch.optim.RMSprop(model.parameters(), lr=hyper_parameter['learning_rate'])
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyper_parameter['scheduler_step_size'],
+                                                gamma=hyper_parameter['scheduler_gamma'])
+    # scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.000001, max_lr=hyper_parameter['learning_rate'],
+    #                                               step_size_up=hyper_parameter['step_size'])
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1, T_mult=2, eta_min=0.000001)
 
     if os.path.isfile("../../models/linformer.pth"):
         check_point = torch.load("../../models/linformer.pth")
         model.load_state_dict(check_point['model_state'])
-        optimizer.load_state_dict(check_point['optimizer_state'])
-        scheduler.load_state_dict(check_point['scheduler_state'])
+        # optimizer.load_state_dict(check_point['optimizer_state'])
+        # scheduler.load_state_dict(check_point['scheduler_state'])
         print("saved model file is found")
 
     kfold = KFold(n_splits=hyper_parameter['num_fold'])
@@ -229,7 +246,7 @@ def train_main() -> None:
         train_data = pre_train_data[train_idx]
         val_data = pre_train_data[val_idx]
 
-        random_choice = np.random.choice(val_data.shape[0], 2)
+        random_choice = np.random.choice(val_data.shape[0], 1)
         test_data = pre_train_data[random_choice, :]
 
         train_dataset = SentenceDataset(train_data, vocab)
@@ -242,15 +259,26 @@ def train_main() -> None:
 
         test_dataLoader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
 
-        test_loop(testLoader=test_dataLoader, model=model, criterion=criterion, device=device, vocab=vocab)
-        training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, hyper_parameter['num_epochs'], scheduler)
-        valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
+        train_loss_list = []
+        validation_loss_list = []
+        for epoch in range(hyper_parameter['num_epochs']):
 
-        if fold_idx % 2 == 0:
-            torch.save({"model_state": model.state_dict(),
-                        "optimizer_state": optimizer.state_dict(),
-                        "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
-            print("model is saving\n")
+            if epoch % 5 == 0:
+                test_loop(testLoader=test_dataLoader, model=model, criterion=criterion, device=device, vocab=vocab)
+
+            train_loss = training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, epoch, scheduler)
+            train_loss_list.append(train_loss)
+            val_loss = valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
+            validation_loss_list.append(val_loss)
+
+        plt.plot(train_loss_list, label='train loss')
+        plt.plot(validation_loss_list, label='val loss')
+        plt.legend()
+        plt.grid()
+        plt.savefig(f"../../observation/{fold_idx}_fold_linformer.jpg")
+        plt.clf()
+        train_loss_list.clear()
+        validation_loss_list.clear()
 
     # os.system('shutdown -')
     # for question, answer in dataLoader:

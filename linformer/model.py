@@ -66,7 +66,7 @@ class LinformerSelfAttention(nn.Module):
         pre_attention = torch.matmul(query, torch.transpose(key, -1, -2)) / math.sqrt(self.head_dim)
         pre_attention = torch.nn.functional.softmax(pre_attention, dim=-1)
 
-        attention = torch.matmul(pre_attention, value)
+        attention = self.dropout(torch.matmul(pre_attention, value))
         attention = attention.view(batch_size, -1, self.d_model)
         attention = self.normalization(attention + origin_sequence)
 
@@ -78,15 +78,15 @@ class FeedForwardNetwork(nn.Module):
         super(FeedForwardNetwork, self).__init__()
         self.feed_forward_network = nn.Sequential(
             nn.Linear(d_model, d_model * 2),
-            nn.GELU(),
+            nn.PReLU(init=0.2),
             nn.Linear(d_model * 2, d_model)
         )
         self.normalization = nn.LayerNorm(d_model)
-        # self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, sequence):
         origin_sequence = sequence.clone()
-        sequence = self.feed_forward_network(sequence)
+        sequence = self.dropout(self.feed_forward_network(sequence))
         sequence = self.normalization(sequence + origin_sequence)
         return sequence
 
