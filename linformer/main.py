@@ -18,6 +18,7 @@ from model import Linformer
 import numpy as np
 import openkorpos_dic
 import matplotlib.pyplot as plt
+import pickle
 
 
 def create_vocab(data) -> iter:
@@ -42,6 +43,8 @@ def update_vocab(vocab) -> iter:
 
     for sentence in test_data:
         for word in mecab.morphs(sentence):
+            # if not word in vocab:
+            #     vocab[word] = len(vocab)
             if not vocab.__contains__(word):
                 vocab.append_token(word)
 
@@ -159,9 +162,13 @@ def test_loop(testLoader, model, criterion, device, vocab):
         for question, answer in testLoader:
             show_question = question.squeeze(0).tolist()
             print(vocab.lookup_tokens(show_question))
+            # reverse_question_sentence = [reverse_vocab[word] for word in show_question]
+            # print(reverse_question_sentence)
 
             show_answer = answer.squeeze(0).tolist()
             print(vocab.lookup_tokens(show_answer))
+            # reverse_answer_sentence = [reverse_vocab[word] for word in show_answer]
+            # print(reverse_answer_sentence)
 
             question = question.to(device)
             answer = answer.to(device)
@@ -178,6 +185,8 @@ def test_loop(testLoader, model, criterion, device, vocab):
 
             predicted_sentence = torch.argmax(predicted, dim=1).tolist()
             print(vocab.lookup_tokens(predicted_sentence))
+            # predicted_sentence = [reverse_vocab[word] for word in predicted_sentence]
+            # print(predicted_sentence)
 
 
 def train_main() -> None:
@@ -207,10 +216,31 @@ def train_main() -> None:
     pre_train_data = pre_train_data.values
     # get vocab
     if not os.path.isfile("../../pickles/vocab.pt"):
+        # print('sorry torchtext module is deprecated so this is no longer used')
+        # vocab = {'<pad>':0, '<eos>':1}
+        # # pbar = tqdm(create_vocab(pre_train_data), ascii=' #')
+        # for sentence in create_vocab(pre_train_data):
+        #     for word in sentence:
+        #         if word in vocab:
+        #             vocab[word] = len(vocab)
         vocab = build_vocab_from_iterator(create_vocab(pre_train_data), specials=['<pad>', '<eos>'])
         vocab = update_vocab(vocab)
+        # with open("../../pickles/vocab.pickle", 'wb') as f:
+        #     pickle.dump(vocab, f)
+
+        # reverse_vocab = dict((value, key) for key, value in vocab.items())
+        # with open('../../pickles/reverse_vocab.pickle', 'wb') as f:
+        #     pickle.dump(reverse_vocab, f)
+
+
+
         torch.save(vocab, "../../pickles/vocab.pt")
     else:
+        # with open("../../pickles/vocab.pickle", 'rb') as f:
+        #     vocab = pickle.load(f)
+        #
+        # with open("../../pickles/reverse_vocab.pickle","rb") as f:
+        #     reverse_vocab = pickle.load(f)
         vocab = torch.load("../../pickles/vocab.pt")
 
     with open("hyper-parameter.yaml") as f:

@@ -62,8 +62,8 @@ def validation_main():
     device = 'cpu'
     model = Linformer(hyper_parameter, len(vocab), device)
 
-    if os.path.isfile("../../models/_linformer.pth"):
-        check_point = torch.load("../../models/_linformer.pth")
+    if os.path.isfile("../../models/linformer.pth"):
+        check_point = torch.load("../../models/linformer.pth")
         model.load_state_dict(check_point['model_state'])
     else:
         print('you should have trained model')

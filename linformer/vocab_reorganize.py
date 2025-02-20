@@ -40,7 +40,7 @@ def csv_to_mecab_user_dic():
     for csv_file in csv_file_path:
         word_csv = csv_file.split('/')[-1].split('.')[0]
         user_dict_path = base_path + word_csv + '.dic'
-        command_txt = f'python3 -m mecab dict-index --userdic {user_dict_path} {base_path + word_csv + '.csv'}'
+        command_txt = f'python3 -m mecab dict-index --userdic {user_dict_path} {base_path + word_csv}.csv'
         system(command_txt)
 
 
