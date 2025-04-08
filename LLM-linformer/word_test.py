@@ -1,46 +1,35 @@
 from mecab import MeCab
-import pandas as pd
+import re
 import openkorpos_dic
-from time import sleep
+from glob import glob
+import json
 
 
-def sentence_parsing_test():
-    chat_data = pd.read_csv("~/DATASET/mapping_data/train.csv")
-    chat_data.drop(['id', 'category'], axis=1, inplace=True)
+def sentence_parsing_test_1():
+    word_dataset = glob("../../../DATASET/news_article_machine_translation_dataset/Training/*/*.json")
+    sentence_list = []
+    for json_file in word_dataset:
+        with open(json_file, 'r') as f:
+            json_dataset = json.load(f)
 
-    pre_train_data = pd.DataFrame()
-    for q_idx in range(2):
-        # training data's question column index
-        question_idx = q_idx + 1
+        for paragraphs in json_dataset['data']:
+            for sentence in paragraphs['paragraphs']:
+                # sentence_splited_by_eol = sentence['context'].split('\n\n')
+                sentence_splited_by_eol = [re.sub('\n', '',sentence.strip('\n').strip()) for sentence in sentence['context'].split('\n\n') if len(sentence) != 0]
+            sentence_list += sentence_splited_by_eol
 
-        # set temporary DataFrame
-        temp_dataframe = pd.DataFrame()
 
-        for ans_idx in range(5):
-            # training data's answer column index
-            answer_idx = ans_idx + 1
-            temp_dataframe['question'] = chat_data[f"질문_{question_idx}"]
-            temp_dataframe['answer'] = chat_data[f'답변_{answer_idx}']
+def sentence_parsing_test_2():
+    word_dataset = glob("../../../DATASET/korean_book_dataset/Training/labled/*/*.json")
+    for json_file in word_dataset:
+        if json_file.count('INFO') > 0:
+            continue
 
-            # concatenate
-            pre_train_data = pd.concat([pre_train_data, temp_dataframe])
-
-    del chat_data
-
-    longest_vocab = 0
-    pre_train_data = pre_train_data.values
-    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR)
-    for i in pre_train_data:
-        for j in i:
-            # sleep(5)
-            num_vocab = len(mecab.morphs(j))
-
-            if num_vocab > longest_vocab:
-                longest_vocab = num_vocab
-
-    print(longest_vocab)
-
+        with open(json_file, 'r') as f:
+            json_dataset = json.load(f)
+        print(type(json_dataset['paragraphs']))
+        exit()
 
 
 if __name__ == '__main__':
-    sentence_parsing_test()
+    sentence_parsing_test_2()
