@@ -1,0 +1,8 @@
+batch_size: 4
+learning_rate: 0.001
+max_len: 800
+num_fold: 5
+shuffle: True
+num_epochs: 15
+scheduler_step_size: 3
+scheduler_gamma: 0.2
