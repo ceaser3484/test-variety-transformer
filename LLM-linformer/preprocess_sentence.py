@@ -179,9 +179,17 @@ def sentence_parsing_test_8():
 
     dataset = dataset.values.flatten()
 
+    word_dataset = "../../../DATASET/paper-question-answer/test.csv"
+    test_dataset = pd.read_csv(word_dataset)
+    test_dataset.drop('id',axis=1, inplace=True)
+    test_dataset = test_dataset.values.flatten()
+    dataset = np.concatenate([dataset, test_dataset], axis=0)
+
     with open('train_dataset.txt', 'w') as f:
         for sentence in dataset:
             f.write(f"{sentence}\n")
+
+
 
 if __name__ == '__main__':
     # sentence_parsing_test_1()

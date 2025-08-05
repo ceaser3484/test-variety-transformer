@@ -46,6 +46,9 @@ class LinformerSelfAttention(nn.Module):
 
         k_key = self.e_weight(key.permute(0, 2, 1))
         k_value = self.f_weight(value.permute(0, 2, 1))
+        print(k_key.size())
+        print(k_value.size())
+        exit()
 
         query = self.query_weight(query)
         key = self.key_weight(k_key.permute(0, 2, 1))

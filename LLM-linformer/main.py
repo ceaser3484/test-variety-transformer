@@ -18,21 +18,43 @@ import matplotlib.pyplot as plt
 import pickle
 
 
-def create_vocab(data) -> iter:
+def create_vocab(data, min_freq=1):
     import glob
+    from collections import Counter
+    import word_process as wp
+
     user_dict = glob.glob("../../mecab-dict/*.dic")
     mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
+    tokens_count = Counter()
+    tokens_list = []
+    vocab = {'<pad>':0, '<sos>':1, '<eos>':2, '<unk>':3, '<current>':4, '<time>':5, '<date>':6, '<NUM>':7}
 
-    vocab = {'<pad>':0, '<sos>':1, '<eos>':2}
     for sentence in data:
-        for token in mecab.pos(sentence):
-            if token not in vocab:
-                print(token)
-                vocab[token] = len(vocab)
+        preprocessed_sentence = wp.replace_currency(sentence, "<current>")
+        preprocessed_sentence = wp.replace_time(preprocessed_sentence, "<time>")
+        preprocessed_sentence = wp.replace_date(preprocessed_sentence, '<date>')
+        preprocessed_sentence = wp.replace_usual_num(preprocessed_sentence, '<NUM>')
+        for morph, pos in mecab.pos(preprocessed_sentence):
+            if morph in vocab.keys():
+                tokens_list.append(morph)
+            else:
+                tokens_list.append(f"{morph}/{pos}")
+    tokens_count.update(tokens_list)
+    current_idx = len(tokens_count)
+    frequently_sorted_token = sorted(tokens_count.items(), key=lambda x: x[1], reverse=True)
+    filtered_tokens = []
+    for token, count in frequently_sorted_token:
+        if token in vocab.keys():
+            continue
+
+        if count >= min_freq:
+            filtered_tokens.append(token)
+
+    for token in filtered_tokens:
+        vocab[token] = len(vocab)
+
     return vocab
 
-def update_vocab(vocab):
-    pass
 
 def make_collate_fn(max_len):
     def collate_fn(batch):
@@ -84,9 +106,9 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epo
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), max_norm=4)
         optimizer.step()
-        # correct += (answer == torch.argmax(predict, dim=-1)).float().sum()
+        correct += (answer == torch.argmax(predict, dim=-1)).float().sum()
         pbar.set_postfix({'loss': loss.item(),
-                          # 'acc': f"{100 * correct / len(predict)}" ,
+                          'acc': f"{100 * correct / len(predict)}" ,
                           'lr':f"{scheduler.get_last_lr()[0]:10f}"})
         loss_list.append(loss.item())
         # scheduler.step()
@@ -173,6 +195,7 @@ def test_loop(testLoader, model, criterion, device, vocab):
 
 
 def train_main() -> None:
+    from random import choices
 
     with open('train_dataset.txt', 'r') as f:
         pre_dataset = [sentence.strip('\n') for sentence in f.readlines()]
@@ -180,7 +203,6 @@ def train_main() -> None:
     # get vocab
     if not os.path.isfile("../../pickles/vocab.pt"):
         vocab = create_vocab(pre_dataset)
-        vocab = update_vocab(vocab)
         torch.save(vocab, "../../pickles/vocab.pth")
     else:
 
@@ -206,39 +228,36 @@ def train_main() -> None:
     if os.path.isfile("../../models/linformer.pth"):
         check_point = torch.load("../../models/linformer.pth")
         model.load_state_dict(check_point['model_state'])
-        # optimizer.load_state_dict(check_point['optimizer_state'])
-        # scheduler.load_state_dict(check_point['scheduler_state'])
+        optimizer.load_state_dict(check_point['optimizer_state'])
+        scheduler.load_state_dict(check_point['scheduler_state'])
         print("saved model file is found")
 
-    kfold = KFold(n_splits=hyper_parameter['num_fold'])
+    for fold_idx in range(hyper_parameter['num_fold']):
+        train_dataset = []
+        valid_dataset = []
+        valid_indexes = choices(range(len(pre_dataset)), k=30)
+        for idx in range(len(pre_dataset)):
+            if idx in valid_indexes:
+                valid_dataset.append(pre_dataset[idx])
+            else:
+                train_dataset.append(pre_dataset[idx])
 
-    for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(pre_train_data)):
-        train_data = pre_train_data[train_idx]
-        val_data = pre_train_data[val_idx]
 
-        random_choice = np.random.choice(val_data.shape[0], 1)
-        test_data = pre_train_data[random_choice, :]
+        train_dataset = SentenceDataset(train_dataset, vocab, hyper_parameter['max_len'])
+        valid_dataset = SentenceDataset(valid_dataset, vocab, hyper_parameter['max_len'])
 
-        train_dataset = SentenceDataset(train_data, vocab)
-        val_dataset = SentenceDataset(val_data, vocab)
-        test_dataset = SentenceDataset(test_data, vocab)
-
-        train_dataLoader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'],
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'],
                                       num_workers=4, collate_fn=collate_fn)
-        val_dataLoader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
-        test_dataLoader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
         train_loss_list = []
         validation_loss_list = []
         for epoch in range(hyper_parameter['num_epochs']):
 
-            if epoch % 5 == 0:
-                test_loop(testLoader=test_dataLoader, model=model, criterion=criterion, device=device, vocab=vocab)
-
-            train_loss = training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, epoch, scheduler)
+            train_loss = training_loop(train_dataloader, model, criterion, optimizer, device, fold_idx, epoch, scheduler)
             train_loss_list.append(train_loss)
-            val_loss = valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
+            val_loss = valadation_loop(valid_dataloader, model, criterion, device, fold_idx)
             validation_loss_list.append(val_loss)
 
         plt.plot(train_loss_list, label='train loss')
@@ -246,9 +265,47 @@ def train_main() -> None:
         plt.legend()
         plt.grid()
         plt.savefig(f"../../observation/{fold_idx}_fold_linformer.jpg")
-        plt.clf()
-        train_loss_list.clear()
-        validation_loss_list.clear()
+
+
+    # kfold = KFold(n_splits=hyper_parameter['num_fold'])
+    #
+    # for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(pre_train_data)):
+    #     train_data = pre_train_data[train_idx]
+    #     val_data = pre_train_data[val_idx]
+    #
+    #     random_choice = np.random.choice(val_data.shape[0], 1)
+    #     test_data = pre_train_data[random_choice, :]
+    #
+    #     train_dataset = SentenceDataset(train_data, vocab)
+    #     val_dataset = SentenceDataset(val_data, vocab)
+    #     test_dataset = SentenceDataset(test_data, vocab)
+    #
+    #     train_dataLoader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'],
+    #                                   num_workers=4, collate_fn=collate_fn)
+    #     val_dataLoader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    #
+    #     test_dataLoader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+    #
+    #     train_loss_list = []
+    #     validation_loss_list = []
+    #     for epoch in range(hyper_parameter['num_epochs']):
+    #
+    #         if epoch % 5 == 0:
+    #             test_loop(testLoader=test_dataLoader, model=model, criterion=criterion, device=device, vocab=vocab)
+    #
+    #         train_loss = training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, epoch, scheduler)
+    #         train_loss_list.append(train_loss)
+    #         val_loss = valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
+    #         validation_loss_list.append(val_loss)
+    #
+    #     plt.plot(train_loss_list, label='train loss')
+    #     plt.plot(validation_loss_list, label='val loss')
+    #     plt.legend()
+    #     plt.grid()
+    #     plt.savefig(f"../../observation/{fold_idx}_fold_linformer.jpg")
+    #     plt.clf()
+    #     train_loss_list.clear()
+    #     validation_loss_list.clear()
 
     # os.system('shutdown -')
     # for question, answer in dataLoader:

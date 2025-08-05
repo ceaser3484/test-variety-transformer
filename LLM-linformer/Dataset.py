@@ -5,25 +5,45 @@ import openkorpos_dic
 
 class SentenceDataset(Dataset):
 
-    def __init__(self, data, vocab):
+    def __init__(self, data, vocab, max_len):
         super(SentenceDataset, self).__init__()
         import glob
+        import word_process as wp
         user_dict = glob.glob("../../mecab-dict/*.dic")
-        self.data = data
+        # self.data = data
         self.vocab = vocab
         self.mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
 
+        self.sentence_list = []
+
+        for sentence in data:
+            token_list = []
+            token_list.append(self.vocab['<sos>'])
+            preprocessed_sentence = wp.replace_currency(sentence, "<current>")
+            preprocessed_sentence = wp.replace_time(preprocessed_sentence, "<time>")
+            preprocessed_sentence = wp.replace_date(preprocessed_sentence, '<date>')
+            preprocessed_sentence = wp.replace_usual_num(preprocessed_sentence, '<NUM>')
+
+            pos_n_tokens = self.mecab.pos(preprocessed_sentence)
+            sentence_length = len(pos_n_tokens)
+            for token, pos in pos_n_tokens:
+                if token in ["<current>","<time>","<date>","<NUM>"]:
+                    token_list.append(vocab[token])
+                else:
+                    token_list.append(vocab[f"{token}/{pos}"])
+            token_list.append(self.vocab['<eos>'])
+
+            if len(token_list) <= (max_len + 1):
+                self.sentence_list.append(token_list)
+            elif len(token_list) > (max_len + 1):
+                residue = len(token_list) - (max_len + 1)
+                for idx in range(residue):
+                    self.sentence_list.append(token_list[idx:idx + (max_len + 1)])
+
     def __len__(self):
-        return self.data.shape[0]
+        return len(self.sentence_list)
 
     def __getitem__(self, item):
-        question, answer = self.data[item, :]
-        question_morphs = self.mecab.morphs(question)
-        answer_morphs = self.mecab.morphs(answer)
-
-        question_tokens = [self.vocab[tokens] for tokens in question_morphs] + [self.vocab['<eos>']]
-        answer_tokens = [self.vocab[token] for token in answer_morphs] + [self.vocab['<eos>']]
-
-        return question_tokens, answer_tokens
+        return self.sentence_list[item][:-1],  self.sentence_list[item][1:]
 
 

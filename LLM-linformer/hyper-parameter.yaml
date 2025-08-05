@@ -1,7 +1,7 @@
 # 훈련 과정에 필요하는 hyperparameter
 batch_size: 4
 learning_rate: 0.0001
-max_len: 600
+max_len: 100
 num_fold: 6
 shuffle: True
 num_epochs: 60
