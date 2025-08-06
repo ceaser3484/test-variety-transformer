@@ -42,13 +42,13 @@ class LinformerSelfAttention(nn.Module):
     def forward(self, query, key, value):
 
         origin_sequence = query.clone()
-        batch_size = query.size(0)
+        batch_size, seq_len, _ = query.size()
 
-        k_key = self.e_weight(key.permute(0, 2, 1))
-        k_value = self.f_weight(value.permute(0, 2, 1))
-        print(k_key.size())
-        print(k_value.size())
-        exit()
+        e_weight_sliced = self.e_weight[:seq_len, :]
+        f_weight_sliced = self.f_weight[:seq_len, :]
+
+        k_key = key.permute(0,2,1) @ e_weight_sliced
+        k_value = value.permute(0,2,1) @ f_weight_sliced
 
         query = self.query_weight(query)
         key = self.key_weight(k_key.permute(0, 2, 1))
@@ -100,8 +100,10 @@ class Blocks(nn.Module):
 
         d_model = hyper_parameter['n_head'] * hyper_parameter['head_dim']
 
-        self.E_weight = nn.Linear(hyper_parameter['max_len'], hyper_parameter['k'], bias=False)
-        self.F_weight = nn.Linear(hyper_parameter['max_len'], hyper_parameter['k'], bias=False)
+        # self.E_weight = nn.Linear(hyper_parameter['max_len'], hyper_parameter['k'], bias=False)
+        # self.F_weight = nn.Linear(hyper_parameter['max_len'], hyper_parameter['k'], bias=False)
+        self.E_weight = nn.Parameter(torch.randn(hyper_parameter['max_len'], hyper_parameter['k']))
+        self.F_weight = nn.Parameter(torch.randn(hyper_parameter['max_len'], hyper_parameter['k']))
 
         self.linformer_self_attention = LinformerSelfAttention(d_model, hyper_parameter['n_head'],
                                                                hyper_parameter['head_dim'], self.E_weight, self.F_weight, hyper_parameter['attention_dropout'])

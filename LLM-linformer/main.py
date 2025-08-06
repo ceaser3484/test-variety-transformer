@@ -56,7 +56,7 @@ def create_vocab(data, min_freq=1):
     return vocab
 
 
-def make_collate_fn(max_len):
+def make_collate_fn():
     def collate_fn(batch):
         question_list = []
         answer_list = []
@@ -71,9 +71,9 @@ def make_collate_fn(max_len):
 
         # sequence's length is made longer to max_len
         seq_length = temp.size(1)
-        if seq_length < max_len:
-            needed_seq_length = max_len - seq_length
-            temp = pad(temp, (0, needed_seq_length, 0, 0), 'constant', 0)
+        # if seq_length < max_len:
+        #     needed_seq_length = max_len - seq_length
+        #     temp = pad(temp, (0, needed_seq_length, 0, 0), 'constant', 0)
 
         question_tensors = temp[:num_questions, :]
         answer_tensors = temp[num_questions:, :]
@@ -90,7 +90,6 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epo
     loss_list = []
     print(f"\nIn {epoch + 1}, learning rate is ", scheduler.get_last_lr()[0])
     pbar = tqdm(dataLoader, ascii=' =')
-    correct = 0
     for idx, (question, answer) in enumerate(pbar):
         pbar.set_description(f"{fold_idx} fold | {epoch + 1} epoch")
         optimizer.zero_grad()
@@ -106,9 +105,11 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epo
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), max_norm=4)
         optimizer.step()
-        correct += (answer == torch.argmax(predict, dim=-1)).float().sum()
+        batch_correct = (answer == torch.argmax(predict, dim=-1)).float().sum().item()
+        batch_total = answer.size(0)
+        batch_accuracy = 100 * (batch_correct / batch_total)
         pbar.set_postfix({'loss': loss.item(),
-                          'acc': f"{100 * correct / len(predict)}" ,
+                          'acc': f"{batch_accuracy :.2f}" ,
                           'lr':f"{scheduler.get_last_lr()[0]:10f}"})
         loss_list.append(loss.item())
         # scheduler.step()
@@ -121,11 +122,6 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epo
           f"median loss is {loss_list[median_idx]}\n"
           f"maximum loss is {loss_list[-1]}\n")
 
-    if (epoch + 1) % 2 == 0:
-        torch.save({"model_state": model.state_dict(),
-                    "optimizer_state": optimizer.state_dict(),
-                    "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
-        print("model is saving\n")
     scheduler.step()
     return sum(loss_list) / len(loss_list)
 
@@ -213,7 +209,7 @@ def train_main() -> None:
     with open("hyper-parameter.yaml") as f:
         hyper_parameter = yaml.full_load(f)
 
-    collate_fn = make_collate_fn(hyper_parameter['max_len'])
+    collate_fn = make_collate_fn()
     batch_size = hyper_parameter['batch_size']
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # device = 'cpu'
@@ -253,6 +249,10 @@ def train_main() -> None:
 
         train_loss_list = []
         validation_loss_list = []
+        lowest_loss = 9999999
+        lowest_epoch = None
+        patience = 20
+
         for epoch in range(hyper_parameter['num_epochs']):
 
             train_loss = training_loop(train_dataloader, model, criterion, optimizer, device, fold_idx, epoch, scheduler)
@@ -260,58 +260,25 @@ def train_main() -> None:
             val_loss = valadation_loop(valid_dataloader, model, criterion, device, fold_idx)
             validation_loss_list.append(val_loss)
 
+            if val_loss <= lowest_loss:
+                lowest_loss = val_loss
+                lowest_epoch = epoch
+
+                torch.save({"model_state": model.state_dict(),
+                            "optimizer_state": optimizer.state_dict(),
+                            "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
+                print("best model is saving\n")
+
+            else:
+                if patience > 0 and lowest_epoch + patience < epoch + 1:
+                    print(f"In {epoch} epoch, model is not better\nNext fold is coming")
+                    break
+
         plt.plot(train_loss_list, label='train loss')
         plt.plot(validation_loss_list, label='val loss')
         plt.legend()
         plt.grid()
         plt.savefig(f"../../observation/{fold_idx}_fold_linformer.jpg")
-
-
-    # kfold = KFold(n_splits=hyper_parameter['num_fold'])
-    #
-    # for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(pre_train_data)):
-    #     train_data = pre_train_data[train_idx]
-    #     val_data = pre_train_data[val_idx]
-    #
-    #     random_choice = np.random.choice(val_data.shape[0], 1)
-    #     test_data = pre_train_data[random_choice, :]
-    #
-    #     train_dataset = SentenceDataset(train_data, vocab)
-    #     val_dataset = SentenceDataset(val_data, vocab)
-    #     test_dataset = SentenceDataset(test_data, vocab)
-    #
-    #     train_dataLoader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'],
-    #                                   num_workers=4, collate_fn=collate_fn)
-    #     val_dataLoader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-    #
-    #     test_dataLoader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
-    #
-    #     train_loss_list = []
-    #     validation_loss_list = []
-    #     for epoch in range(hyper_parameter['num_epochs']):
-    #
-    #         if epoch % 5 == 0:
-    #             test_loop(testLoader=test_dataLoader, model=model, criterion=criterion, device=device, vocab=vocab)
-    #
-    #         train_loss = training_loop(train_dataLoader, model, criterion, optimizer, device, fold_idx, epoch, scheduler)
-    #         train_loss_list.append(train_loss)
-    #         val_loss = valadation_loop(val_dataLoader, model, criterion, device, fold_idx)
-    #         validation_loss_list.append(val_loss)
-    #
-    #     plt.plot(train_loss_list, label='train loss')
-    #     plt.plot(validation_loss_list, label='val loss')
-    #     plt.legend()
-    #     plt.grid()
-    #     plt.savefig(f"../../observation/{fold_idx}_fold_linformer.jpg")
-    #     plt.clf()
-    #     train_loss_list.clear()
-    #     validation_loss_list.clear()
-
-    # os.system('shutdown -')
-    # for question, answer in dataLoader:
-    #     print(question)
-    #     print(answer)
-
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
