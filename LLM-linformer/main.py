@@ -110,7 +110,7 @@ def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epo
         batch_accuracy = 100 * (batch_correct / batch_total)
         pbar.set_postfix({'loss': loss.item(),
                           'acc': f"{batch_accuracy :.2f}" ,
-                          'lr':f"{scheduler.get_last_lr()[0]:10f}"})
+                          'lr':f"{scheduler.get_last_lr()[0]:13f}"})
         loss_list.append(loss.item())
         # scheduler.step()
 
@@ -212,6 +212,7 @@ def train_main() -> None:
     collate_fn = make_collate_fn()
     batch_size = hyper_parameter['batch_size']
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    is_loaded_model = False
     # device = 'cpu'
 
     model = Linformer(hyper_parameter, num_vocab=len(vocab), device=device).to(device)
@@ -226,12 +227,13 @@ def train_main() -> None:
         model.load_state_dict(check_point['model_state'])
         optimizer.load_state_dict(check_point['optimizer_state'])
         scheduler.load_state_dict(check_point['scheduler_state'])
+        is_loaded_model = True
         print("saved model file is found")
 
     for fold_idx in range(hyper_parameter['num_fold']):
         train_dataset = []
         valid_dataset = []
-        valid_indexes = choices(range(len(pre_dataset)), k=30)
+        valid_indexes = choices(range(len(pre_dataset)), k=10)
         for idx in range(len(pre_dataset)):
             if idx in valid_indexes:
                 valid_dataset.append(pre_dataset[idx])
@@ -260,19 +262,21 @@ def train_main() -> None:
             val_loss = valadation_loop(valid_dataloader, model, criterion, device, fold_idx)
             validation_loss_list.append(val_loss)
 
-            if val_loss <= lowest_loss:
-                lowest_loss = val_loss
-                lowest_epoch = epoch
+            if fold_idx >= 1:
+                if val_loss <= lowest_loss:
+                    lowest_loss = val_loss
+                    lowest_epoch = epoch
 
-                torch.save({"model_state": model.state_dict(),
-                            "optimizer_state": optimizer.state_dict(),
-                            "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
-                print("best model is saving\n")
+                    torch.save({"model_state": model.state_dict(),
+                                "optimizer_state": optimizer.state_dict(),
+                                "scheduler_state": scheduler.state_dict()}, "../../models/linformer.pth")
+                    print("best model is saving\n")
 
-            else:
-                if patience > 0 and lowest_epoch + patience < epoch + 1:
-                    print(f"In {epoch} epoch, model is not better\nNext fold is coming")
-                    break
+                else:
+
+                    if patience > 0 and lowest_epoch + patience < epoch + 1:
+                        print(f"In {epoch} epoch, model is not better\nNext fold is coming")
+                        break
 
         plt.plot(train_loss_list, label='train loss')
         plt.plot(validation_loss_list, label='val loss')

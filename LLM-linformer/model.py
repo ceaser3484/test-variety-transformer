@@ -81,7 +81,7 @@ class FeedForwardNetwork(nn.Module):
         super(FeedForwardNetwork, self).__init__()
         self.feed_forward_network = nn.Sequential(
             nn.Linear(d_model, d_model * 2),
-            nn.PReLU(init=0.2),
+            nn.GELU(),
             nn.Linear(d_model * 2, d_model)
         )
         self.normalization = nn.LayerNorm(d_model)
