@@ -1,0 +1,6 @@
+batch_size: 64
+learning_rate: 0.005
+max_len: 120
+num_fold: 5
+shuffle: True
+num_epochs: 30
