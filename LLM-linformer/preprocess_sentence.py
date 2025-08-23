@@ -85,9 +85,24 @@ def sentence_parsing_test_3():
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
 
-# document summarization
+# research_paper_summarization
 def sentence_parsing_test_4():
     from glob import glob
+    import json
+
+    # dataset_path = "../../../DATASET/document_summarization/*"
+    dataset_path = "../../../DATASET/research_paper_summarization/*/*/*.json"
+    json_files = glob(dataset_path)
+    
+    for json_file in json_files:
+        with open(json_file) as f:
+            data = json.load(f)
+            
+            for context in data['data']:
+                pass
+                
+
+
     
 
 if __name__ == '__main__':
@@ -95,3 +110,4 @@ if __name__ == '__main__':
     sentence_parsing_test_1()
     sentence_parsing_test_2()
     sentence_parsing_test_3()
+    # sentence_parsing_test_4()

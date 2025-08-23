@@ -1,11 +1,12 @@
 from torch.utils.data import Dataset
 from mecab import MeCab
 import openkorpos_dic
+from tqdm import tqdm
 
 
 class SentenceDataset(Dataset):
 
-    def __init__(self, data, vocab, max_len):
+    def __init__(self, data, vocab, max_len, state):
         super(SentenceDataset, self).__init__()
         import glob
         import word_process as wp
@@ -15,8 +16,9 @@ class SentenceDataset(Dataset):
         self.mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
 
         self.sentence_list = []
-
-        for sentence in data:
+        pbar = tqdm(data, ascii='# ')
+        for sentence in pbar:
+            pbar.set_description(f"{state} wrapping: ")
             token_list = []
             token_list.append(self.vocab['<sos>'])
             preprocessed_sentence = wp.replace_currency(sentence, "<current>")
@@ -30,7 +32,10 @@ class SentenceDataset(Dataset):
                 if token in ["<current>","<time>","<date>","<NUM>"]:
                     token_list.append(vocab[token])
                 else:
-                    token_list.append(vocab[f"{token}/{pos}"])
+                    if f"{token}/{pos}" in vocab:
+                        token_list.append(vocab[f"{token}/{pos}"])
+                    else:
+                        token_list.append(vocab['<unk>'])
             token_list.append(self.vocab['<eos>'])
 
             if len(token_list) <= (max_len + 1):

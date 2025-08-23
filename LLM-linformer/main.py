@@ -18,10 +18,11 @@ import matplotlib.pyplot as plt
 import pickle
 
 
-def create_vocab(data, min_freq=1):
+def create_vocab(data, min_freq=100):
     import glob
     from collections import Counter
     import word_process as wp
+    pbar = tqdm(data)
 
     user_dict = glob.glob("../../mecab-dict/*.dic")
     mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
@@ -29,7 +30,8 @@ def create_vocab(data, min_freq=1):
     tokens_list = []
     vocab = {'<pad>':0, '<sos>':1, '<eos>':2, '<unk>':3, '<current>':4, '<time>':5, '<date>':6, '<NUM>':7, '<answer>':8}
 
-    for sentence in data:
+    for sentence in pbar:
+        pbar.set_description(f"vocab is creating: ")
         preprocessed_sentence = wp.replace_currency(sentence, "<current>")
         preprocessed_sentence = wp.replace_time(preprocessed_sentence, "<time>")
         preprocessed_sentence = wp.replace_date(preprocessed_sentence, '<date>')
@@ -44,7 +46,8 @@ def create_vocab(data, min_freq=1):
     frequently_sorted_token = sorted(tokens_count.items(), key=lambda x: x[1], reverse=True)
     filtered_tokens = []
     for token, count in frequently_sorted_token:
-        if token in vocab.keys():
+
+        if token in vocab.keys(): # 중복이 없기 위해서 vocab내에 key가 있다면.. 넘어가!
             continue
 
         if count >= min_freq:
@@ -193,19 +196,25 @@ def test_loop(testLoader, model, criterion, device, vocab):
 
 def train_main() -> None:
     from random import choices
+    from glob import glob
+
     torch.manual_seed(999)
     torch.cuda.manual_seed_all(999)
 
-    with open('train_dataset.txt', 'r') as f:
-        pre_dataset = [sentence.strip('\n') for sentence in f.readlines()]
+    
+    pre_dataset = []
+    txt_set = glob('*.txt')
+    for txt in txt_set:
+        with open(txt, 'r') as f:
+            pre_dataset += [sentence.strip('\n') for sentence in f.readlines()]
 
     # get vocab
-    if not os.path.isfile("../../pickles/vocab.pt"):
+    if not os.path.isfile("../../pickles/vocab.pth"):
         vocab = create_vocab(pre_dataset)
         torch.save(vocab, "../../pickles/vocab.pth")
     else:
 
-        vocab = torch.load("../../pickles/vocab.pt")
+        vocab = torch.load("../../pickles/vocab.pth")
 
     reverse_vocab = dict((value, key) for key, value in vocab.items())
 
@@ -244,8 +253,8 @@ def train_main() -> None:
                 train_dataset.append(pre_dataset[idx])
 
 
-        train_dataset = SentenceDataset(train_dataset, vocab, hyper_parameter['max_len'])
-        valid_dataset = SentenceDataset(valid_dataset, vocab, hyper_parameter['max_len'])
+        train_dataset = SentenceDataset(train_dataset, vocab, hyper_parameter['max_len'], 'train')
+        valid_dataset = SentenceDataset(valid_dataset, vocab, hyper_parameter['max_len'], 'validation')
 
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'],
                                       num_workers=4, collate_fn=collate_fn)
