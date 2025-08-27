@@ -13,15 +13,16 @@ from tqdm import tqdm
 import os
 from model import Linformer
 import numpy as np
-import openkorpos_dic
 import matplotlib.pyplot as plt
 import pickle
+from torch.cuda.amp import autocast, GradScaler
 
 
 def create_vocab(data, min_freq=100):
     import glob
     from collections import Counter
     import word_process as wp
+    import openkorpos_dic
     pbar = tqdm(data)
 
     user_dict = glob.glob("../../mecab-dict/*.dic")
@@ -89,32 +90,53 @@ def make_collate_fn():
 def training_loop(dataLoader, model, criterion, optimizer, device, fold_idx, epoch, scheduler):
     model.train()
 
-
     loss_list = []
+    scaler = GradScaler()
+    accumulation_step = 16
+
     print(f"\nIn {epoch + 1}, learning rate is ", scheduler.get_last_lr()[0])
     pbar = tqdm(dataLoader, ascii=' =')
     for idx, (question, answer) in enumerate(pbar):
         pbar.set_description(f"{fold_idx} fold | {epoch + 1} epoch")
-        optimizer.zero_grad()
+        # optimizer.zero_grad()
         question = question.to(device)
         answer = answer.to(device)
 
-        predict = model(question)
-        num_token = predict.size(2)
-        predict = predict.view(-1, num_token)
-        answer = answer.reshape(-1)
+        with autocast():
 
-        loss = criterion(predict, answer)
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), max_norm=4)
-        optimizer.step()
+            predict = model(question)
+            num_token = predict.size(2)
+            predict = predict.view(-1, num_token)
+            answer = answer.reshape(-1)
+
+            loss = criterion(predict, answer)
+        
+        loss = loss / accumulation_step
+
+        # 3. 역전파를 수행하여 경사 누적
+        scaler.scale(loss).backward()
+
+        if (idx + 1) % accumulation_step == 0 or (idx + 1) == len(dataLoader):
+
+            scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=4)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad() # 경사 초기화
+
+        if (idx + 1) % 100000 == 0:
+            torch.save({"model_state": model.state_dict(),
+                                "optimizer_state": optimizer.state_dict(),
+                                "scheduler_state": scheduler.state_dict()}, "../../models/processing_linformer.pth")
+            print("best model is saving\n")
+
         batch_correct = (answer == torch.argmax(predict, dim=-1)).float().sum().item()
         batch_total = answer.size(0)
         batch_accuracy = 100 * (batch_correct / batch_total)
-        pbar.set_postfix({'loss': loss.item(),
+        pbar.set_postfix({'loss': float(loss) * accumulation_step,
                           'acc': f"{batch_accuracy :.2f}" ,
                           'lr':f"{scheduler.get_last_lr()[0]:13f}"})
-        loss_list.append(loss.item())
+        loss_list.append(loss.item() * accumulation_step)
         # scheduler.step()
 
     print(f"\nIn this epoch", '.' * 10)
@@ -234,13 +256,25 @@ def train_main() -> None:
                                                 gamma=hyper_parameter['scheduler_gamma'])
 
 
-    if os.path.isfile("../../models/best_linformer.pth"):
+    if os.path.isfile("../../models/processing_linformer.pth"):
         check_point = torch.load("../../models/linformer.pth")
         model.load_state_dict(check_point['model_state'])
         optimizer.load_state_dict(check_point['optimizer_state'])
         scheduler.load_state_dict(check_point['scheduler_state'])
-        is_loaded_model = True
+        is_loaded_model = False
         print("saved model file is found")
+
+    elif os.path.isfile("../../models/best_linformer.pth"):
+        check_point = torch.load("../../models/linformer.pth")
+        model.load_state_dict(check_point['model_state'])
+        optimizer.load_state_dict(check_point['optimizer_state'])
+        scheduler.load_state_dict(check_point['scheduler_state'])
+        is_loaded_model = False
+        print("saved model file is found")
+    
+    else:
+        print("newly training")
+
 
     for fold_idx in range(hyper_parameter['num_fold']):
         train_dataset = []
@@ -257,7 +291,7 @@ def train_main() -> None:
         valid_dataset = SentenceDataset(valid_dataset, vocab, hyper_parameter['max_len'], 'validation')
 
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=hyper_parameter['shuffle'],
-                                      num_workers=4, collate_fn=collate_fn)
+                                      num_workers=6, pin_memory=True, collate_fn=collate_fn)
 
         valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
@@ -274,21 +308,21 @@ def train_main() -> None:
             val_loss = valadation_loop(valid_dataloader, model, criterion, device, fold_idx)
             validation_loss_list.append(val_loss)
 
-            if fold_idx >= 1:
-                if val_loss <= lowest_loss:
-                    lowest_loss = val_loss
-                    lowest_epoch = epoch
+            
+            if (val_loss <= lowest_loss) and (fold_idx >= 1 or is_loaded_model):
+                lowest_loss = val_loss
+                lowest_epoch = epoch
 
-                    torch.save({"model_state": model.state_dict(),
-                                "optimizer_state": optimizer.state_dict(),
-                                "scheduler_state": scheduler.state_dict()}, "../../models/best_linformer.pth")
-                    print("best model is saving\n")
+                torch.save({"model_state": model.state_dict(),
+                            "optimizer_state": optimizer.state_dict(),
+                            "scheduler_state": scheduler.state_dict()}, "../../models/best_linformer.pth")
+                print("best model is saving\n")
 
-                else:
+            else:
 
-                    if hyper_parameter['patience'] > 0 and lowest_epoch + hyper_parameter['patience'] < epoch + 1:
-                        print(f"In {epoch} epoch, model is not better\nNext fold is coming")
-                        break
+                if hyper_parameter['patience'] > 0 and lowest_epoch + hyper_parameter['patience'] < epoch + 1:
+                    print(f"In {epoch} epoch, model is not better\nNext fold is coming")
+                    break
 
         plt.plot(train_loss_list, label='train loss')
         plt.plot(validation_loss_list, label='val loss')

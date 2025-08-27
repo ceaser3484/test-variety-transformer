@@ -16,7 +16,7 @@ class SentenceDataset(Dataset):
         self.mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
 
         self.sentence_list = []
-        pbar = tqdm(data, ascii='# ')
+        pbar = tqdm(data, ascii='.#')
         for sentence in pbar:
             pbar.set_description(f"{state} wrapping: ")
             token_list = []
