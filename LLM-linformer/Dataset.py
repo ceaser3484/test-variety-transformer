@@ -38,17 +38,16 @@ class SentenceDataset(Dataset):
                         token_list.append(vocab['<unk>'])
             token_list.append(self.vocab['<eos>'])
 
-            if len(token_list) <= (max_len + 1):
+            if len(token_list) <= (max_len):
                 self.sentence_list.append(token_list)
-            elif len(token_list) > (max_len + 1):
-                residue = len(token_list) - (max_len + 1)
+            elif len(token_list) > (max_len):
+                residue = len(token_list) - (max_len)
                 for idx in range(residue):
-                    self.sentence_list.append(token_list[idx:idx + (max_len + 1)])
+                    self.sentence_list.append(token_list[idx:idx + (max_len)])
 
     def __len__(self):
         return len(self.sentence_list)
 
     def __getitem__(self, item):
-        return self.sentence_list[item][:-1],  self.sentence_list[item][1:]
-
+        return self.sentence_list[item],  self.sentence_list[item]
 

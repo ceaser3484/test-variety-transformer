@@ -96,10 +96,11 @@ def sentence_parsing_test_4():
     
     for json_file in json_files:
         with open(json_file) as f:
-            data = json.load(f)
-            
-            for context in data['data']:
-                pass
+            research_papers = json.load(f)
+            # print(research_papers['data'][0])
+            # print(research_papers['data'][0]['summary_entire'][0].keys()) # orginal_text', 'summary_text'
+            print(research_papers['data'][0]['summary_entire'][0]['orginal_text'])
+            exit()
                 
 
 
@@ -107,7 +108,7 @@ def sentence_parsing_test_4():
 
 if __name__ == '__main__':
 
-    sentence_parsing_test_1()
-    sentence_parsing_test_2()
-    sentence_parsing_test_3()
-    # sentence_parsing_test_4()
+    # sentence_parsing_test_1()
+    # sentence_parsing_test_2()
+    # sentence_parsing_test_3()
+    sentence_parsing_test_4()
