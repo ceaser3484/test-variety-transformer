@@ -5,7 +5,16 @@ import re
 import openkorpos_dic
 from glob import glob
 import json
+from tqdm import tqdm
 
+# 지금까지 preprossessed 된 것들. 
+# mapping qna, korean_data_LLM, article summerization, healthcare_QNA, machine_reading
+# summerization_n_generate_report
+
+# 해결이 필요한 것들
+# korean_corpus_from_books, document_reading
+
+# 진행 중 : research_paper_summarization, document_reading
 
 # mapping qna
 def sentence_parsing_test_1():
@@ -29,10 +38,8 @@ def sentence_parsing_test_1():
 
 # korean_data_LLM
 def sentence_parsing_test_2():
-    # TODO 수정 필요
     from glob import glob
     import json
-    import re
 
     dataset_path = "../../../DATASET/korean_data_LLM/*json"
     dataset_files = glob(dataset_path)
@@ -40,8 +47,9 @@ def sentence_parsing_test_2():
     
     with open(dataset_files[0]) as f:
         data = json.load(f)
-
-    for info in data['data_info']:
+    pbar = tqdm(data['data_info'])
+    for info in pbar:
+        pbar.set_description("korean_data_LLM")
         question = info['question'].strip().replace('\n','')
         sentence_list.append(question)
         for i in range(1, 6):
@@ -66,8 +74,9 @@ def sentence_parsing_test_3():
     dataset_path = "../../../DATASET/article_summarization/*/*/*.json"
     json_files = glob(dataset_path)
     sentence_list = []
-
-    for json_file in json_files:
+    pbar = tqdm(json_files)
+    for json_file in pbar:
+        pbar.set_description("article_summmarization")
         with open(json_file) as f:
             data = json.load(f)
         for context in data['data']:
@@ -85,8 +94,103 @@ def sentence_parsing_test_3():
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
 
-# research_paper_summarization
+# healthcare_QNA
 def sentence_parsing_test_4():
+    from glob import glob
+    import json
+
+    dataset_path = "../../../DATASET/healthcare_QNA/*/*/labeled/*/*/*/*/*"
+    json_files = glob(dataset_path)
+    sentence_list = []
+    pbar = tqdm(json_files)
+    
+    for json_file in pbar:
+        pbar.set_description("healthcare_QNA")
+        with open(json_file) as f:
+            data = json.load(f)
+            if 'answer' in data.keys():
+                answer_sentence = ''
+                for sentence in data['answer'].values():
+                    answer_sentence += sentence
+                sentence_list.append(answer_sentence)
+            elif 'question' in data.keys():
+                sentence_list.append(data['question'])
+
+    with open("healthcare_QNA.txt", 'w') as f:
+        for sentence in sentence_list:
+            f.write(f"{sentence}\n")
+
+# machine_reading
+def sentence_parsing_test_5():
+    from glob import glob
+    import json
+
+    dataset_path = "../../../DATASET/machine_reading/*.json"
+    json_files = glob(dataset_path)
+    sentence_list = []
+    for json_file in json_files:
+        with open(json_file) as f:
+            data = json.load(f)
+            # print(data.keys()) # 'creator', 'version', 'data'
+            for datum in data['data']:
+                paragraphs = datum['paragraphs'][0]
+                context = paragraphs['context']
+                sentence_list.append(context)
+                # print(len(paragraphs['qas']))
+                for qas in paragraphs['qas']:
+                    if len(qas) == 3:
+                        # print(qas.keys())  # 'classtype', 'id', 'question'
+                        # 이 데이터셋은 answer가 없음. 
+                        question = qas['question']
+                        sentence_list.append(question)
+                    elif len(qas) == 4:
+                        # print(qas.keys()) # 'question', 'answers', 'id', 'classtype'
+                        question = qas['question']
+                        for answer in qas['answers']:
+                            sentence_list.append(answer['text'])
+                    else:
+                        # print(qas.keys())  # 'classtype', 'id', 'answers', 'question', 'clue'
+                        question = qas['question']
+                        answer = qas['answers'][0]['text']
+                        sentence_list.append(question)
+                        sentence_list.append(answer)
+
+    with open("machine_reading.txt", 'w') as f:
+        for sentence in sentence_list:
+            f.write(f"{sentence}\n")
+                        
+# summerization_n_generate_report
+def sentence_parsing_test_6():
+    from glob import glob
+    import json
+
+    dataset_path = "../../../DATASET/summerization_n_generate_report/*/*/*/*/*/*.json"
+    json_files = glob(dataset_path)
+    sentence_list = []
+    pbar = tqdm(json_files)
+    for json_file in pbar:
+        pbar.set_description("summerization_n_generate_report")
+        with open(json_file) as f:
+            data = json.load(f)
+        # print(data.keys()) # 'Meta(Acqusition)', 'Meta(Refine)', 'Annotation'
+        context = data['Meta(Refine)']
+        sentence_list.append(context)
+        for annotation in data['Annotation'].values():
+            if annotation is None:
+                continue
+            sentence_list.append(annotation)
+    
+    with open("machine_reading.txt", 'w') as f:
+        for sentence in sentence_list:
+            f.write(f"{sentence}\n")    
+
+# document_reading
+def sentence_parsing_test_():
+    pass
+
+
+# research_paper_summarization
+def sentence_parsing_test_processing():
     from glob import glob
     import json
 
@@ -99,7 +203,9 @@ def sentence_parsing_test_4():
             research_papers = json.load(f)
             # print(research_papers['data'][0])
             # print(research_papers['data'][0]['summary_entire'][0].keys()) # orginal_text', 'summary_text'
+            
             print(research_papers['data'][0]['summary_entire'][0]['orginal_text'])
+
             exit()
                 
 
@@ -111,4 +217,6 @@ if __name__ == '__main__':
     # sentence_parsing_test_1()
     # sentence_parsing_test_2()
     # sentence_parsing_test_3()
-    sentence_parsing_test_4()
+    # sentence_parsing_test_4()
+    # sentence_parsing_test_5()
+    sentence_parsing_test_6()
