@@ -9,12 +9,12 @@ from tqdm import tqdm
 
 # 지금까지 preprossessed 된 것들. 
 # mapping qna, korean_data_LLM, article summerization, healthcare_QNA, machine_reading
-# summerization_n_generate_report
+# summerization_n_generate_report, document_reading
 
 # 해결이 필요한 것들
-# korean_corpus_from_books, document_reading
+# korean_corpus_from_books, 
 
-# 진행 중 : research_paper_summarization, document_reading
+# 진행 중 : research_paper_summarization
 
 # mapping qna
 def sentence_parsing_test_1():
@@ -185,8 +185,57 @@ def sentence_parsing_test_6():
             f.write(f"{sentence}\n")    
 
 # document_reading
-def sentence_parsing_test_():
-    pass
+def sentence_parsing_test_7():
+    from glob import glob
+    import json
+
+    dataset_path = "../../../DATASET/document_reading/*/*/*/*"
+    json_files = glob(dataset_path)
+    sentence_list = []
+    pbar = tqdm(json_files)
+    for json_file in pbar:
+        pbar.set_description("document_reading")
+        with open(json_file) as f:
+            data = json.load(f)
+        # print(data.keys())  # 'Dataset', 'data'
+        for data in data['data']:
+            # print(data.keys())  # 'doc_id', 'doc_title', 'doc_source', 'doc_published', 'doc_class', 'created', 'paragraphs'
+            title = data['doc_title']
+            sentence_list.append(title)
+            paragraph = data['paragraphs'][0]
+            context = paragraph['context']
+            sentence_list.append(context)
+            for qas in paragraph['qas']:
+                question = qas['question']
+                answer = qas['answers']['text']
+                sentence_list.append(question)
+                sentence_list.append(answer)
+            
+    with open("document_reading.txt", 'w') as f:
+        for sentence in sentence_list:
+            f.write(f"{sentence}\n")  
+
+# korean_corpus_from_books
+def sentence_parsing_test_8():
+    from glob import glob
+    import json
+
+    dataset_path = "../../../DATASET/korean_corpus_from_books/*/*/*.json"
+    json_files = glob(dataset_path)
+    sentence_list = []
+    for json_file in json_files:
+        with open(json_file) as f:
+            data = json.load(f)
+        for paragraph in data['paragraphs']:
+            for sentence in paragraph['sentences']:
+                text = sentence['text']
+                origin = sentence['original_text']
+
+    with open("document_reading.txt", 'w') as f:
+        for sentence in sentence_list:
+            f.write(f"{sentence}\n")   
+            
+        
 
 
 # research_paper_summarization
@@ -219,4 +268,6 @@ if __name__ == '__main__':
     # sentence_parsing_test_3()
     # sentence_parsing_test_4()
     # sentence_parsing_test_5()
-    sentence_parsing_test_6()
+    # sentence_parsing_test_6()
+    # sentence_parsing_test_7()
+    sentence_parsing_test_8()
