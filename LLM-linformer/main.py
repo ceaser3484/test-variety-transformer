@@ -34,7 +34,7 @@ def create_vocab(data, min_freq=50):
     tokens_count = Counter()
     digit_re = re.compile(r"(\d)")
     
-    vocab = {'<pad>':0, '<unk>':1, '<mask>':2, '<answer>':3, '<sep>':4}
+    vocab = {'<pad>':0, '<unk>':1, '<mask>':2, '<answer>':3, '<cls>':4, '<sep>':5}
     pbar = tqdm(data, disable=g_is_connected_terminal)
 
     for sentence in pbar:
@@ -58,7 +58,7 @@ def create_vocab(data, min_freq=50):
 
     return vocab
 
-def tokenize_and_chunking(text_dataset, max_len):
+def tokenize_and_chunking(text_dataset, vocab, max_len):
     import glob
     import openkorpos_dic
     from mecab import MeCab
@@ -72,14 +72,20 @@ def tokenize_and_chunking(text_dataset, max_len):
     pbar = tqdm(text_dataset, disable=g_is_connected_terminal)
     for paragraph in pbar:
         sentences = split_sentences(paragraph)
+        print(sentences)
+        exit()
         for sentence in sentences:
             pbar.set_description(f"tokenizing and chunking: ")
             
             sentence = digit_re.sub(r"\1", sentence)
-            tokens = []
+            tokens = [vocab['<cls>']] # 문장 시작 토큰
             for morph, pos in mecab.pos(sentence):
-                tokens.append(f"{morph}/{pos}")
-            tokens.append('<sep>') # 문장 구분 토큰
+                if f"{morph}/{pos}" in vocab:
+                    tokens.append(vocab[f"{morph}/{pos}"])
+                else:
+                    tokens.append(vocab['<unk>'])
+            tokens.append(vocab['<sep>']) # 문장 구분 토큰
+
             if len(tokens) > max_len - 2: # <answer>, <pad> 토큰을 위해서 2개 빼줌
                 for idx in range(0, len(tokens), max_len - 2):
                     token_chunk.append(tokens[idx:idx + max_len - 2])
@@ -267,33 +273,34 @@ def train_main() -> None:
     # torch.manual_seed(999)
     # torch.cuda.manual_seed_all(999)
  
-    
-    pre_dataset = []
-    txt_set = glob('*.txt')
-    for txt in txt_set:
-        with open(txt, 'r') as f:
-            pre_dataset += [sentence.strip('\n') for sentence in f.readlines()]
+    with open("hyper-parameter.yaml") as f:
+        hyper_parameter = yaml.full_load(f)
 
-    # get vocab
-    if not os.path.isfile("../../pickles/vocab.pth"):
-        vocab = create_vocab(pre_dataset)
-        torch.save(vocab, "../../pickles/vocab.pth")
-    else:
 
-        vocab = torch.load("../../pickles/vocab.pth")
-
-    reverse_vocab = dict((value, key) for key, value in vocab.items())
-
-    # TODO :  문장을 모두 토큰화 하여 숫자 인덱스로 바꾸기
     if not os.path.isfile("../../pickles/pre_dataset.pth"):
         print("pre_dataset is processing...")
-        exit()
+
+        pre_dataset = []
+        txt_set = glob('*.txt')
+        for txt in txt_set:
+            with open(txt, 'r') as f:
+                pre_dataset += [sentence.strip('\n') for sentence in f.readlines()]
+
+        # get vocab
+        if not os.path.isfile("../../pickles/vocab.pth"):
+            vocab = create_vocab(pre_dataset)
+            torch.save(vocab, "../../pickles/vocab.pth")
+        else:
+            vocab = torch.load("../../pickles/vocab.pth")
+
+        reverse_vocab = dict((value, key) for key, value in vocab.items())
+        
+        # tokenizing and chunking
+        pre_dataset = tokenize_and_chunking(pre_dataset, vocab, max_len=hyper_parameter['max_len'])
     else:
         with open("../../pickles/pre_dataset.pth", 'rb') as f:
             pre_dataset = pickle.load(f)
 
-    with open("hyper-parameter.yaml") as f:
-        hyper_parameter = yaml.full_load(f)
 
     wandb.login()
     wandb.init(project="LLM-linformer",

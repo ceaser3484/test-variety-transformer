@@ -38,7 +38,6 @@ def sentence_parsing_test_1():
 
 # korean_data_LLM
 def sentence_parsing_test_2():
-    from glob import glob
     import json
 
     dataset_path = "../../../DATASET/korean_data_LLM/*json"
@@ -62,13 +61,12 @@ def sentence_parsing_test_2():
         sentence_list.append(info['question'].strip())
         sentence_list.append(info['answer']['contents'].replace('\n','').strip())
 
-    with open("LLM_text.txt", 'w') as f:
+    with open("korean_data_LLM.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
 
 # article summerization 
 def sentence_parsing_test_3():
-    from glob import glob
     import json
 
     dataset_path = "../../../DATASET/article_summarization/*/*/*.json"
@@ -96,7 +94,6 @@ def sentence_parsing_test_3():
 
 # healthcare_QNA
 def sentence_parsing_test_4():
-    from glob import glob
     import json
 
     dataset_path = "../../../DATASET/healthcare_QNA/*/*/labeled/*/*/*/*/*"
@@ -122,7 +119,6 @@ def sentence_parsing_test_4():
 
 # machine_reading
 def sentence_parsing_test_5():
-    from glob import glob
     import json
 
     dataset_path = "../../../DATASET/machine_reading/*.json"
@@ -161,7 +157,6 @@ def sentence_parsing_test_5():
                         
 # summerization_n_generate_report
 def sentence_parsing_test_6():
-    from glob import glob
     import json
 
     dataset_path = "../../../DATASET/summerization_n_generate_report/*/*/*/*/*/*.json"
