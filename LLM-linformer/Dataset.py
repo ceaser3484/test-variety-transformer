@@ -14,7 +14,6 @@ class SentenceDataset(Dataset):
         # self.data = data
         self.vocab = vocab
         self.mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
-
         self.sentence_list = []
         pbar = tqdm(data, ascii='.#')
         for sentence in pbar:
@@ -29,13 +28,10 @@ class SentenceDataset(Dataset):
             pos_n_tokens = self.mecab.pos(preprocessed_sentence)
             sentence_length = len(pos_n_tokens)
             for token, pos in pos_n_tokens:
-                if token in ["<current>","<time>","<date>","<NUM>"]:
-                    token_list.append(vocab[token])
+                if f"{token}/{pos}" in vocab:
+                    token_list.append(vocab[f"{token}/{pos}"])
                 else:
-                    if f"{token}/{pos}" in vocab:
-                        token_list.append(vocab[f"{token}/{pos}"])
-                    else:
-                        token_list.append(vocab['<unk>'])
+                    token_list.append(vocab['<unk>'])
             token_list.append(self.vocab['<eos>'])
 
             if len(token_list) <= (max_len):

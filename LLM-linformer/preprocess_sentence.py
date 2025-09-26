@@ -9,10 +9,10 @@ from tqdm import tqdm
 
 # 지금까지 preprossessed 된 것들. 
 # mapping qna, korean_data_LLM, article summerization, healthcare_QNA, machine_reading
-# summerization_n_generate_report, document_reading
+# summerization_n_generate_report, , korean_corpus_from_books
 
 # 해결이 필요한 것들
-# korean_corpus_from_books, 
+# , 
 
 # 진행 중 : research_paper_summarization
 
@@ -230,6 +230,8 @@ def sentence_parsing_test_8():
             for sentence in paragraph['sentences']:
                 text = sentence['text']
                 origin = sentence['original_text']
+                sentence_list.append(text)
+                sentence_list.append(origin)
 
     with open("document_reading.txt", 'w') as f:
         for sentence in sentence_list:
@@ -239,7 +241,7 @@ def sentence_parsing_test_8():
 
 
 # research_paper_summarization
-def sentence_parsing_test_processing():
+def sentence_parsing_test_9():
     from glob import glob
     import json
 
@@ -253,7 +255,8 @@ def sentence_parsing_test_processing():
             # print(research_papers['data'][0])
             # print(research_papers['data'][0]['summary_entire'][0].keys()) # orginal_text', 'summary_text'
             
-            print(research_papers['data'][0]['summary_entire'][0]['orginal_text'])
+            original_text = research_papers['data'][0]['summary_entire'][0]['orginal_text']
+            print(research_papers['data'])
 
             exit()
                 
@@ -263,11 +266,12 @@ def sentence_parsing_test_processing():
 
 if __name__ == '__main__':
 
-    # sentence_parsing_test_1()
-    # sentence_parsing_test_2()
-    # sentence_parsing_test_3()
-    # sentence_parsing_test_4()
-    # sentence_parsing_test_5()
-    # sentence_parsing_test_6()
-    # sentence_parsing_test_7()
+    sentence_parsing_test_1()
+    sentence_parsing_test_2()
+    sentence_parsing_test_3()
+    sentence_parsing_test_4()
+    sentence_parsing_test_5()
+    sentence_parsing_test_6()
+    sentence_parsing_test_7()
     sentence_parsing_test_8()
+    # sentence_parsing_test_9()
