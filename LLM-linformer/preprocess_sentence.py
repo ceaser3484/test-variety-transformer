@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 # 진행 중 : research_paper_summarization
 
-# mapping qna
+# mapping_qna
 def sentence_parsing_test_1():
     import pandas as pd
     import numpy as np
@@ -32,7 +32,7 @@ def sentence_parsing_test_1():
     test_dataset = test_dataset.values.flatten()
     dataset = np.concatenate([dataset, test_dataset], axis=0)
 
-    with open('train_dataset.txt', 'w') as f:
+    with open('./DATA/mapping_qna.txt', 'w') as f:
         for sentence in dataset:
             f.write(f"{sentence}\n")
 
@@ -61,7 +61,7 @@ def sentence_parsing_test_2():
         sentence_list.append(info['question'].strip())
         sentence_list.append(info['answer']['contents'].replace('\n','').strip())
 
-    with open("korean_data_LLM.txt", 'w') as f:
+    with open("./DATA/korean_data_LLM.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
 
@@ -88,7 +88,7 @@ def sentence_parsing_test_3():
                 sentence_list.append(question)
                 sentence_list.append(answer)
 
-    with open("article_summarization.txt", 'w') as f:
+    with open("./DATA/article_summarization.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
 
@@ -113,7 +113,7 @@ def sentence_parsing_test_4():
             elif 'question' in data.keys():
                 sentence_list.append(data['question'])
 
-    with open("healthcare_QNA.txt", 'w') as f:
+    with open("./DATA/healthcare_QNA.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
 
@@ -151,7 +151,7 @@ def sentence_parsing_test_5():
                         sentence_list.append(question)
                         sentence_list.append(answer)
 
-    with open("machine_reading.txt", 'w') as f:
+    with open("./DATA/machine_reading.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")
                         
@@ -175,7 +175,7 @@ def sentence_parsing_test_6():
                 continue
             sentence_list.append(annotation)
     
-    with open("machine_reading.txt", 'w') as f:
+    with open("./DATA/summerization_n_generate_report.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")    
 
@@ -206,12 +206,260 @@ def sentence_parsing_test_7():
                 sentence_list.append(question)
                 sentence_list.append(answer)
             
-    with open("document_reading.txt", 'w') as f:
+    with open("./DATA/document_reading.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")  
 
-# korean_corpus_from_books
+# official_service_data
 def sentence_parsing_test_8():
+    from glob import glob
+    import json
+
+    def clean_text(text_list):
+
+        pattern_1 = re.compile(r"▲{1,}")
+        pattern_2 = re.compile(r"네, {1,}")
+        pattern_3 = re.compile(r"\n\t")
+        result = []
+        for text in text_list:
+            text = text.strip()
+            # text = text.split(":")[-1]
+            text = pattern_1.sub("<unk>", text)
+            text = pattern_2.sub("네, ", text)
+            text = pattern_3.sub("", text)
+            result.append(text.replace('\t',''))
+        return result
+            
+    def reorganize_dialogue(contents, speaker1='손님', speaker2='상담사'):
+        contents = contents.split('\n')
+        last_speaker = None
+        buffer = ""
+        merged = []
+
+        for text in contents:
+            text = text.strip()
+            if not text:
+                continue
+            
+            if text.startswith(speaker1):
+                speaker = speaker1
+                content = text[len(speaker) + 1:].strip()
+                
+            elif text.startswith(speaker2):
+                speaker = speaker2
+                content = text[len(speaker) + 1:].strip()
+
+            else:
+                continue
+
+            if last_speaker == speaker:
+                buffer += ". " + content
+            else:
+                if buffer:
+                    merged.append((last_speaker, buffer))
+                buffer = content
+                last_speaker = speaker
+        
+        if buffer:
+            merged.append((last_speaker, buffer))
+        
+        
+        return merged
+        
+    dataset_path = "../../../DATASET/official_service_data/*/*/*"
+    json_files = glob(dataset_path)
+    sentence_list = []
+    pbar = tqdm(json_files)
+    
+
+    for json_file in pbar:
+    
+        pbar.set_description("official_service_data")
+        with open(json_file) as f:
+            data = json.load(f)
+        len_data_keys = len(data[0].keys())
+
+        if len_data_keys == 11:
+
+            paragraph = data[0]['instructions'][0]['data'][0]
+            instruction = paragraph['instruction']
+            dialogue = paragraph['input'].strip()
+            dialogue = reorganize_dialogue(dialogue, speaker1='상담원', speaker2='고객')
+            reorganized_dialogue = []
+            for role, talk in dialogue:
+                reorganized_dialogue.append(f"{role}: {talk}")
+            answer = paragraph['output'].strip()
+            cleaned_text = clean_text([instruction] + reorganized_dialogue + [answer])
+            sentence_list.extend(cleaned_text)
+            
+        elif len_data_keys == 9:
+            qna = data[0]['consulting_content'].split("\n\n")
+            
+            cleaned_text = clean_text([sentence.replace('\n','') for sentence in qna])
+            sentence_list.extend(cleaned_text)
+
+        elif len_data_keys == 8:
+            
+            # print(data[0].keys()) # 'consulting_content', 'instructions'
+            qna = [sentence.replace('\n','') for sentence in data[0]['consulting_content'].split("\n\n")]
+            idx_list = []
+            for idx, sentence in enumerate(qna):
+                if sentence.startswith("Q") or sentence.startswith("A"):
+                    idx_list.append(idx)
+
+            head = ''.join(qna[:idx_list[0]])
+            question = ''.join(qna[idx_list[0]:idx_list[1]+1])
+            answer = ''.join(qna[idx_list[1]:])
+            cleaned_text = clean_text([head, question, answer])
+            sentence_list.extend(cleaned_text)
+
+
+            instruction = data[0]['instructions'][0]['data'][0]['instruction']
+            output = data[0]['instructions'][0]['data'][0]['output']
+            cleaned_text = clean_text([instruction, output])
+            sentence_list.extend(cleaned_text)
+
+    
+    with open("./DATA/official_service_data.txt", 'w') as f:
+        for sentence in sentence_list:
+            f.write(f"{sentence}\n")
+
+# unofficial_service_data
+def sentence_parsing_test_9():
+    from glob import glob
+    import json
+    import re
+
+    def clean_text(text_list):
+
+        for text in text_list:
+            text = re.sub(r'<(NAME|CHARGE|DATE)>', '<unk>', text)
+            text = re.sub(r"▲{1,}", "<unk>", text)
+
+        return text
+
+    def reorganize_dialogue(contents, speaker1='손님', speaker2='상담사'):
+        contents = contents.split('\n')
+        last_speaker = None
+        buffer = ""
+        merged = []
+
+        for text in contents:
+            text = text.strip()
+            if not text:
+                continue
+            
+            if text.startswith(speaker1):
+                speaker = speaker1
+                content = text[len(speaker) + 1:].strip()
+                
+            elif text.startswith(speaker2):
+                speaker = speaker2
+                content = text[len(speaker) + 1:].strip()
+
+            else:
+                continue
+
+            if last_speaker == speaker:
+                buffer += ". " + content
+            else:
+                if buffer:
+                    merged.append((last_speaker, buffer))
+                buffer = content
+                last_speaker = speaker
+        
+        if buffer:
+            merged.append((last_speaker, buffer))
+        
+        return merged
+
+    dataset_path = "../../../DATASET/unofficial_service_data/*/labeled/*.json"
+    json_files = glob(dataset_path)
+    pbar = tqdm(json_files)
+    sentence_list = []
+
+    for json_file in pbar:
+        pbar.set_description("unofficial_service_data")
+        with open(json_file) as f:
+            data = json.load(f)
+        num_key = len(data[0].keys())
+        if num_key == 8:
+
+            contents = data[0]['consulting_content'].replace('\n','').strip()
+            cleaned_text = clean_text([contents])
+            parts = re.split(r'(고객:|상담사:)', cleaned_text)
+            rebuilt_dialogue = []
+            for i in range(1, len(parts), 2):
+                rebuilt_dialogue.append(parts[i] + parts[i+1].strip())
+
+            merged_dialogue = reorganize_dialogue('\n'.join(rebuilt_dialogue), speaker1='고객', speaker2='상담사')
+            for speaker, content in merged_dialogue:
+                # print(f"{speaker}: {content}")
+                sentence_list.append(f"{speaker}: {content}")
+
+            sentence_list.append(data[0]['instructions'][0]['data'][0]['instruction'])
+            sentence_list.append(data[0]['instructions'][0]['data'][0]['output'])
+                   
+        elif num_key == 10:
+            # print(data[0].keys()) # 'source', 'source_id', 'consulting_category', 'client_gender', 'client_age', 'consulting_time', 'consulting_turns', 'consulting_length', 'consulting_content', 'instructions'
+            contents = data[0]['consulting_content']
+            cleaned_text = clean_text([contents])
+            merged_dialogue = reorganize_dialogue(cleaned_text[0])
+            for speaker, content in merged_dialogue:
+                sentence_list.append(f"{speaker}: {content}")
+
+            sentence_list.append(cleaned_text)
+            sentence_list.append(data[0]['instructions'][0]['data'][0]['instruction'])
+            sentence_list.append(data[0]['instructions'][0]['data'][0]['output'])
+            
+
+        elif num_key == 11:
+            
+            # print(data[0].keys())  # 'source', 'source_id', 'consulting_date', 'consulting_category', 'client_gender', 'client_age', 'consulting_time', 'consulting_turns', 'consulting_length', 'consulting_content', 'instructions'
+            contents = data[0]['consulting_content'].split('\n')
+            last_speaker = None
+            buffer = ""
+            merged = []
+
+            for text in contents:
+                text = text.strip()
+                if not text:
+                    continue
+                
+                cleaned_text = clean_text([text])
+                customer = '손님'
+                agent = '상담사'
+                if cleaned_text.startswith('손님'):
+                    speaker = customer
+                    content = cleaned_text[len(speaker) + 1:].strip()
+                    
+                elif cleaned_text.startswith(agent):
+                    speaker = agent
+                    content = cleaned_text[len(agent) + 1:].strip()
+
+                else:
+                    continue
+
+                if last_speaker == speaker:
+                    buffer += ". " + content
+                else:
+                    if buffer:
+                        merged.append((last_speaker, buffer))
+                    buffer = content
+                    last_speaker = speaker
+            
+            if buffer:
+                merged.append((last_speaker, buffer))
+            
+            for speaker, content in merged:
+                # print(f"{speaker}: {content}")
+                sentence_list.append(f"{speaker}: {content}")
+    
+        with open("./DATA/unofficial_service_data.txt", 'w') as f:
+            for sentence in sentence_list:
+                f.write(f"{sentence}\n")
+# korean_corpus_from_books
+def sentence_parsing_test_miss_1():
     from glob import glob
     import json
 
@@ -228,7 +476,7 @@ def sentence_parsing_test_8():
                 sentence_list.append(text)
                 sentence_list.append(origin)
 
-    with open("document_reading.txt", 'w') as f:
+    with open("./DATA/korean_corpus_from_books.txt", 'w') as f:
         for sentence in sentence_list:
             f.write(f"{sentence}\n")   
             
@@ -236,7 +484,7 @@ def sentence_parsing_test_8():
 
 
 # research_paper_summarization
-def sentence_parsing_test_9():
+def sentence_parsing_test_miss_2():
     from glob import glob
     import json
 
@@ -261,6 +509,8 @@ def sentence_parsing_test_9():
 
 if __name__ == '__main__':
 
+    import os
+    os.makedirs('./DATA', exist_ok=True)
     sentence_parsing_test_1()
     sentence_parsing_test_2()
     sentence_parsing_test_3()
@@ -269,4 +519,5 @@ if __name__ == '__main__':
     sentence_parsing_test_6()
     sentence_parsing_test_7()
     sentence_parsing_test_8()
-    # sentence_parsing_test_9()
+    sentence_parsing_test_9()
+    

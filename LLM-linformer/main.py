@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 import pickle
 from torch.cuda.amp import autocast, GradScaler
 import sys
-import re
 import wandb
 
 
@@ -27,71 +26,38 @@ def create_vocab(data, min_freq=50):
     import glob
     from collections import Counter
     import openkorpos_dic
-    
-    user_dict = glob.glob("../../mecab-dict/*.dic")
-
-    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
-    tokens_count = Counter()
-    digit_re = re.compile(r"(\d)")
-    
-    vocab = {'<pad>':0, '<unk>':1, '<mask>':2, '<answer>':3, '<cls>':4, '<sep>':5}
+    import re
     pbar = tqdm(data, disable=g_is_connected_terminal)
 
+    user_dict = glob.glob("../../mecab-dict/*.dic")
+    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
+    tokens_count = Counter()
+    digits = re.compile(r'\d')
+    tokens_list = []
+    vocab = {'<pad>':0, '<unk>':1, '<mask>':2, '<answer>':3, '<cls>':4, '<sep>':5}
+
     for sentence in pbar:
-        tokens_list = []
         pbar.set_description(f"vocab is creating: ")
-        preprocessed_sentence = digit_re.sub(r"\1", sentence)
-        
+        preprocessed_sentence = re.sub(r"",sentence)
+
         for morph, pos in mecab.pos(preprocessed_sentence):
             tokens_list.append(f"{morph}/{pos}")
-        tokens_count.update(tokens_list)
-    # current_idx = len(tokens_count)
+    tokens_count.update(tokens_list)
+    current_idx = len(tokens_count)
     frequently_sorted_token = sorted(tokens_count.items(), key=lambda x: x[1], reverse=True)
-    # filtered_tokens = []
+    filtered_tokens = []
     for token, count in frequently_sorted_token:
 
-        if token in vocab: # 중복이 없기 위해서 vocab내에 key가 있다면.. 넘어가!
+        if token in vocab.keys(): # 중복이 없기 위해서 vocab내에 key가 있다면.. 넘어가!
             continue
 
         if count >= min_freq:
-            vocab[token] = len(vocab)     
+            filtered_tokens.append(token)
+
+    for token in filtered_tokens:
+        vocab[token] = len(vocab)
 
     return vocab
-
-def tokenize_and_chunking(text_dataset, vocab, max_len):
-    import glob
-    import openkorpos_dic
-    from mecab import MeCab
-    from kss import split_sentences
-    
-    user_dict = glob.glob("../../mecab-dict/*.dic")
-
-    mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dict)
-    digit_re = re.compile(r"(\d)")
-    token_chunk = []
-    pbar = tqdm(text_dataset, disable=g_is_connected_terminal)
-    for paragraph in pbar:
-        sentences = split_sentences(paragraph)
-        print(sentences)
-        exit()
-        for sentence in sentences:
-            pbar.set_description(f"tokenizing and chunking: ")
-            
-            sentence = digit_re.sub(r"\1", sentence)
-            tokens = [vocab['<cls>']] # 문장 시작 토큰
-            for morph, pos in mecab.pos(sentence):
-                if f"{morph}/{pos}" in vocab:
-                    tokens.append(vocab[f"{morph}/{pos}"])
-                else:
-                    tokens.append(vocab['<unk>'])
-            tokens.append(vocab['<sep>']) # 문장 구분 토큰
-
-            if len(tokens) > max_len - 2: # <answer>, <pad> 토큰을 위해서 2개 빼줌
-                for idx in range(0, len(tokens), max_len - 2):
-                    token_chunk.append(tokens[idx:idx + max_len - 2])
-            else:
-                token_chunk.append(tokens)
-    return token_chunk
 
 
 def make_collate_fn(pad_token, mask_token):
@@ -103,8 +69,6 @@ def make_collate_fn(pad_token, mask_token):
             # mask 씌울 준비
             probability_matrix = torch.full(question.size(), 0.15) # 0.15
             masked_indices = torch.bernoulli(probability_matrix).bool()
-            question[masked_indices] = mask_token
-            answer[~masked_indices] = pad_token # 정답지에는 마스크 안씌운 부분은 패드로 바꿔줌
 
             question_list.append(torch.tensor(question))
             answer_list.append(torch.tensor(answer))
@@ -269,37 +233,64 @@ def test_loop(testLoader, model, criterion, device, vocab):
 def train_main() -> None:
     from random import choices
     from glob import glob
+    import gzip
 
     # torch.manual_seed(999)
     # torch.cuda.manual_seed_all(999)
  
+    
+    # pre_dataset = []
+    # txt_set = glob('*.txt')
+    # for txt in txt_set:
+    #     with open(txt, 'r') as f:
+    #         pre_dataset += [sentence.strip('\n') for sentence in f.readlines()]
+
+    # get vocab
+
     with open("hyper-parameter.yaml") as f:
         hyper_parameter = yaml.full_load(f)
 
 
-    if not os.path.isfile("../../pickles/pre_dataset.pth"):
-        print("pre_dataset is processing...")
+    # if not os.path.isfile("../../pickles/vocab.pth"):
+    #     vocab = create_vocab(pre_dataset)
+    #     torch.save(vocab, "../../pickles/vocab.pth")
+    # else:
+    #
+    #     vocab = torch.load("../../pickles/vocab.pth")
 
+    # reverse_vocab = dict((value, key) for key, value in vocab.items())
+
+    if not os.path.isfile("../../pickles/tokenized_data.gz.pkl"):
+        if not os.path.exists("./data/"):
+            print("there is data file")
+            exit()
+
+        import multi_processing as mt
         pre_dataset = []
-        txt_set = glob('*.txt')
+        txt_set = glob('./data/*.txt')
         for txt in txt_set:
-            with open(txt, 'r') as f:
+            with open(txt, 'r', encoding='utf-8') as f:
                 pre_dataset += [sentence.strip('\n') for sentence in f.readlines()]
 
-        # get vocab
         if not os.path.isfile("../../pickles/vocab.pth"):
-            vocab = create_vocab(pre_dataset)
+            vocab = mt.multi_thread_create_vocab(pre_dataset, min_freq=hyper_parameter['min_freq'])
             torch.save(vocab, "../../pickles/vocab.pth")
+
+
         else:
             vocab = torch.load("../../pickles/vocab.pth")
+            print("progressed")
 
         reverse_vocab = dict((value, key) for key, value in vocab.items())
-        
-        # tokenizing and chunking
-        pre_dataset = tokenize_and_chunking(pre_dataset, vocab, max_len=hyper_parameter['max_len'])
+        torch.save(vocab, "../../pickles/reversed_vocab.pth")
+
+        chunked_tokenized_data = mt.multi_thread_chunk_sentence(pre_dataset, vocab, max_length=hyper_parameter['max_len'])
+        # torch.save(chunked_tokenized_data, "../../pickles/chunked_tokenized_data.pth")
+
     else:
-        with open("../../pickles/pre_dataset.pth", 'rb') as f:
-            pre_dataset = pickle.load(f)
+        print("there is not tokenized data file")
+        exit()
+
 
 
     wandb.login()
@@ -337,7 +328,7 @@ def train_main() -> None:
         model.load_state_dict(check_point['model_state'])
         optimizer.load_state_dict(check_point['optimizer_state'])
         scheduler.load_state_dict(check_point['scheduler_state'])
-        is_loaded_model = True
+        is_loaded_model = False
         print("saved model file is found")
     
     else:
