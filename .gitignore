@@ -162,4 +162,7 @@ cython_debug/
 #.idea/
 LLM-linformer/DATA/
 LLM-linformer/wandb/
+performer/DATA/
+performer/wandb/
+
 .idea/
