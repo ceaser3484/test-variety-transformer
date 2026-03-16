@@ -24,27 +24,32 @@ def __create_vocab(sentences):
     global global_mecab
     token_sentence_list = []
     for sentence in kss.split_sentences(sentences):
-        sentence = re.sub(r'([^가-힣A-Za-z])', r' \1 ', sentence)
+        processed_sentence = re.sub(r'([^가-힣A-Za-z])', r' \1 ', sentence)
 
-        for morph, pos in global_mecab.pos(sentence):
+        for morph, pos in global_mecab.pos(processed_sentence):
             morph = morph.strip()
 
             if morph.isdigit():
-                token_sentence_list += [f"{digit}/{pos}" for digit in morph]
+                token_sentence_list += [f"{digit}<@>{pos}" for digit in morph]
 
             elif re.fullmatch(r'[\u4E00-\u9FFF]+', morph):
                 # 한자어가 여러 글자일 경우 → 문자 단위로 분리
-                token_sentence_list += [f"{char}/{pos}" for char in morph]
+                token_sentence_list += [f"{char}<@>{pos}" for char in morph]
             
             elif re.fullmatch(r'[^\w\s]+', morph):
                 # 특수문자도 하나하나씩 분리
-                token_sentence_list += [f"{char}/{pos}" for char in morph]
+                token_sentence_list += [f"{char}<@>{pos}" for char in morph]
 
             else:
                 if morph == "<unk>":
-                    token_sentence_list.append("<unk>")
+                    token_list.append(vocab['<unk>'])
                 else:
-                    token_sentence_list.append(f"{morph}/{pos}")
+                    if pos == "NNG" or pos == "NNP":
+                        token = f"{morph}<@>noun"
+                    else:
+                        token = f"{morph}<@>{pos}"
+                    token_list.append(vocab[token])
+
     return token_sentence_list
 
 
@@ -155,34 +160,37 @@ def __chunk_sentence(paragraph, vocab, max_length):
     sentences = kss.split_sentences(paragraph)
     for sentence in sentences:
         
-        sentence = re.sub(r'([^가-힣])', r' \1 ', sentence)
+        pre_sentence =re.sub(r'([^가-힣A-Za-z])', r' \1 ', sentence)
 
         # MeCab으로 형태소 분석
-        for morph, pos in global_mecab.pos(sentence):
+        for morph, pos in global_mecab.pos(pre_sentence):
             morph = morph.strip()
             # 숫자는 한 글자씩 분리
             if morph.isdigit():
                 for digit in morph:
-                    token = f"{digit}/{pos}"
-                    token_list.append(vocab.get(token, vocab['<unk>']))
+                    token = f"{digit}<@>{pos}"
+                    token_list.append(vocab[token])
 
             # 한자는 한 글자씩 분리
             elif re.fullmatch(r'[\u4E00-\u9FFF]+', morph):
                 for char in morph:
-                    token = f"{char}/{pos}"
+                    token = f"{char}<@>{pos}"
                     token_list.append(vocab[token])
 
             # 특수문자는 하나하나씩 떼어서
             elif re.fullmatch(r'[^\w\s]+', morph):
                 for char in morph:
-                    token = f"{char}/{pos}"
+                    token = f"{char}<@>{pos}"
                     token_list.append(vocab[token])
 
             else:
                 if morph == "<unk>":
                     token_list.append(vocab['<unk>'])
                 else:
-                    token = f"{morph}/{pos}"
+                    if pos == "NNG" or pos == "NNP":
+                        token = f"{morph}<@>noun"
+                    else:
+                        token = f"{morph}<@>{pos}"
                     token_list.append(vocab[token])
                 
         token_list.append(vocab['<sep>'])  # 문장 종료 토큰

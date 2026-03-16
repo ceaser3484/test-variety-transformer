@@ -11,6 +11,9 @@ def train_main():
     with open("hyper-parameter.yaml") as f:
         hyper_parameter = yaml.full_load(f)
 
+    # vocab = torch.load("../../pickles/vocab.pth")
+    # print(vocab)
+    # exit()
 
     # 데이터 로드 또는 생성
     if os.path.isfile("../../pickles/tokenized_data.gz.pkl"):
