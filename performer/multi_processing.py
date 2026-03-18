@@ -10,6 +10,8 @@ from mecab import MeCab
 import kss
 
 global_mecab = None
+hanja_pattern = re.compile(r'[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]')
+symbol_pattern = re.compile(r'[^가-힣A-Za-z0-9\s]')
 
 def __init_mecab():
     global global_mecab
@@ -32,23 +34,23 @@ def __create_vocab(sentences):
             if morph.isdigit():
                 token_sentence_list += [f"{digit}<@>{pos}" for digit in morph]
 
-            elif re.fullmatch(r'[\u4E00-\u9FFF]+', morph):
+            elif hanja_pattern.search(morph):
                 # 한자어가 여러 글자일 경우 → 문자 단위로 분리
-                token_sentence_list += [f"{char}<@>{pos}" for char in morph]
+                token_sentence_list += [f"{char}<@>SH" for char in morph]
             
-            elif re.fullmatch(r'[^\w\s]+', morph):
+            elif symbol_pattern.search(morph):
                 # 특수문자도 하나하나씩 분리
                 token_sentence_list += [f"{char}<@>{pos}" for char in morph]
 
             else:
                 if morph == "<unk>":
-                    token_list.append(vocab['<unk>'])
+                    token_sentence_list.append('<unk>')
                 else:
                     if pos == "NNG" or pos == "NNP":
                         token = f"{morph}<@>noun"
                     else:
                         token = f"{morph}<@>{pos}"
-                    token_list.append(vocab[token])
+                    token_sentence_list.append(token)
 
     return token_sentence_list
 
@@ -169,19 +171,19 @@ def __chunk_sentence(paragraph, vocab, max_length):
             if morph.isdigit():
                 for digit in morph:
                     token = f"{digit}<@>{pos}"
-                    token_list.append(vocab[token])
+                    token_list.append(vocab.get(token, vocab['<unk>']))
 
             # 한자는 한 글자씩 분리
-            elif re.fullmatch(r'[\u4E00-\u9FFF]+', morph):
+            elif hanja_pattern.search(morph):
                 for char in morph:
-                    token = f"{char}<@>{pos}"
-                    token_list.append(vocab[token])
+                    token = f"{char}<@>SH"
+                    token_list.append(vocab.get(token, vocab['<unk>']))
 
             # 특수문자는 하나하나씩 떼어서
-            elif re.fullmatch(r'[^\w\s]+', morph):
+            elif symbol_pattern.search(morph):
                 for char in morph:
                     token = f"{char}<@>{pos}"
-                    token_list.append(vocab[token])
+                    token_list.append(vocab.get(token, vocab['<unk>']))
 
             else:
                 if morph == "<unk>":
@@ -191,7 +193,7 @@ def __chunk_sentence(paragraph, vocab, max_length):
                         token = f"{morph}<@>noun"
                     else:
                         token = f"{morph}<@>{pos}"
-                    token_list.append(vocab[token])
+                    token_list.append(vocab.get(token, vocab['<unk>']))
                 
         token_list.append(vocab['<sep>'])  # 문장 종료 토큰
     token_list.append(vocab['<eos>'])  # 문단 종료 토큰

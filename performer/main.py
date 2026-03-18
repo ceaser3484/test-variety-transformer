@@ -68,6 +68,8 @@ def train_main():
     
     for key in vocab.keys():
         print(key)
+
+    
             
 if __name__ == '__main__':
     train_main()
