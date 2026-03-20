@@ -164,5 +164,5 @@ LLM-linformer/DATA/
 LLM-linformer/wandb/
 performer/DATA/
 performer/wandb/
-
+performer/logs/
 .idea/

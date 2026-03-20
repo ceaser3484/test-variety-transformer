@@ -7,26 +7,26 @@ import re
 import glob
 import openkorpos_dic
 from mecab import MeCab
-import kss
+import kss as kss_module
 
 global_mecab = None
+kss = None
 hanja_pattern = re.compile(r'[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]')
 symbol_pattern = re.compile(r'[^가-힣A-Za-z0-9\s]')
 
 def __init_mecab():
-    global global_mecab
+    global global_mecab, kss
     user_dicts = glob.glob("../../mecab-dict/*.dic")
     global_mecab = MeCab(dictionary_path=openkorpos_dic.DICDIR, user_dictionary_path=user_dicts)
-    global kss
-    kss = kss
+    kss = kss_module
 
 def __create_vocab(sentences):
     import re
     
     global global_mecab
     token_sentence_list = []
-    for sentence in kss.split_sentences(sentences):
-        processed_sentence = re.sub(r'([^가-힣A-Za-z])', r' \1 ', sentence)
+    for sentence in kss_module.split_sentences(sentences):
+        processed_sentence = re.sub(r'([^가-힣A-Za-z0-9])', r' \1 ', sentence)
 
         for morph, pos in global_mecab.pos(processed_sentence):
             morph = morph.strip()
@@ -72,7 +72,7 @@ def __process_batch_for_vocab(chunks):
 def multi_thread_create_vocab(data, min_freq=20):
     import time
     print("multi thread create vocab start")
-    vocab = {'<pad>':0,'<sos>':1,'<eos>':2,'<unk>': 3, '<mask>': 4, '<answer>': 5, '<cls>': 6, '<sep>': 7}
+    vocab = {'<pad>':0,'<sos>':1,'<eos>':2,'<unk>': 3, '<answer>': 4, '<cls>': 5, '<sep>': 6}
     global_counter = Counter()
     data.sort(key=len, reverse=True)
     print("🚀 multi-processing phase start")
@@ -143,7 +143,7 @@ def temp_func(data):
 
 
 
-def __chunk_sentence(paragraph, vocab, max_length):
+def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
     """
     하나의 문장을 토큰화하고 max_length에 맞게 chunking
 
@@ -157,46 +157,60 @@ def __chunk_sentence(paragraph, vocab, max_length):
     """
     global global_mecab
     global kss
+    import os
 
+    os.makedirs(log_dir, exist_ok=True)
+    pid = os.getpid()
+    log_file = os.path.join(log_dir, f"process_{pid}.log")
+    
     token_list = [vocab['<sos>'], vocab['<cls>']]  # 문장 시작 토큰
-    sentences = kss.split_sentences(paragraph)
-    for sentence in sentences:
-        
-        pre_sentence =re.sub(r'([^가-힣A-Za-z])', r' \1 ', sentence)
+    sentences = kss_module.split_sentences(paragraph)
+    with open(log_file, 'a', encoding='utf-8') as f:
+        for sentence in sentences:
+            
+            pre_sentence = re.sub(r'([^가-힣A-Za-z0-9])', r' \1 ', sentence)
 
-        # MeCab으로 형태소 분석
-        for morph, pos in global_mecab.pos(pre_sentence):
-            morph = morph.strip()
-            # 숫자는 한 글자씩 분리
-            if morph.isdigit():
-                for digit in morph:
-                    token = f"{digit}<@>{pos}"
-                    token_list.append(vocab.get(token, vocab['<unk>']))
+            # MeCab으로 형태소 분석
+            for morph, pos in global_mecab.pos(pre_sentence):
+                morph = morph.strip()
+                # 숫자는 한 글자씩 분리
+                if morph.isdigit():
+                    for digit in morph:
+                        token = f"{digit}<@>{pos}"
+                        if token not in vocab or pos == "UNKNOWN":
+                            f.write(f"[PID {pid}] 숫자 토큰 미스매치 \n문장 : {sentence}\n형태소: {morph}, 품사: {pos}\n생성된 토큰: {token}\n\n")
+                        token_list.append(vocab.get(token, vocab['<unk>']))
 
-            # 한자는 한 글자씩 분리
-            elif hanja_pattern.search(morph):
-                for char in morph:
-                    token = f"{char}<@>SH"
-                    token_list.append(vocab.get(token, vocab['<unk>']))
+                # 한자는 한 글자씩 분리
+                elif hanja_pattern.search(morph):
+                    for char in morph:
+                        token = f"{char}<@>SH"
+                        if token not in vocab or pos == "UNKNOWN":
+                            f.write(f"[PID {pid}] 한자 토큰 미스매치 \n문장 : {sentence}\n형태소: {char}, 품사: SH\n생성된 토큰: {token}\n\n")
+                        token_list.append(vocab.get(token, vocab['<unk>']))
 
-            # 특수문자는 하나하나씩 떼어서
-            elif symbol_pattern.search(morph):
-                for char in morph:
-                    token = f"{char}<@>{pos}"
-                    token_list.append(vocab.get(token, vocab['<unk>']))
+                # 특수문자는 하나하나씩 떼어서
+                elif symbol_pattern.search(morph):
+                    for char in morph:
+                        token = f"{char}<@>{pos}"
+                        if token not in vocab:
+                            f.write(f"[PID {pid}] 특수문자 토큰 미스매치 \n문장 : {sentence}\n형태소: {char}, 품사: {pos}\n생성된 토큰: {token}\n\n")
+                        token_list.append(vocab.get(token, vocab['<unk>']))
 
-            else:
-                if morph == "<unk>":
-                    token_list.append(vocab['<unk>'])
                 else:
-                    if pos == "NNG" or pos == "NNP":
-                        token = f"{morph}<@>noun"
+                    if morph == "<unk>":
+                        token_list.append(vocab['<unk>'])
                     else:
-                        token = f"{morph}<@>{pos}"
-                    token_list.append(vocab.get(token, vocab['<unk>']))
-                
-        token_list.append(vocab['<sep>'])  # 문장 종료 토큰
-    token_list.append(vocab['<eos>'])  # 문단 종료 토큰
+                        if pos == "NNG" or pos == "NNP":
+                            token = f"{morph}<@>noun"
+                        else:
+                            token = f"{morph}<@>{pos}"
+                            if token not in vocab or pos == "UNKNOWN":
+                                f.write(f"[PID {pid}] 일반 토큰 미스매치 \n문장 : {sentence}\n형태소: {morph}, 품사: {pos}\n생성된 토큰: {token}\n\n")
+                            token_list.append(vocab.get(token, vocab['<unk>']))
+
+            token_list.append(vocab['<sep>'])  # 문장 종료 토큰
+        token_list.append(vocab['<eos>'])  # 문단 종료 토큰
 
     # max_length로 chunking
     chunked = []
