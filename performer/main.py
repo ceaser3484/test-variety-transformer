@@ -94,7 +94,7 @@ def train_main():
             else:
                 print("✅ 기존 모델 파일 없음, 새로 생성 예정")
 
-            vocab = mt.multi_thread_create_vocab(pre_dataset, min_freq=hyper_parameter['min_freq'])
+            vocab = mt.multi_thread_create_vocab(pre_dataset, min_freq=hyper_parameter['min_freq'] + 1)
             torch.save(vocab, "../../pickles/vocab.pth")
 
             reverse_vocab = dict((value, key) for key, value in vocab.items())
@@ -113,7 +113,7 @@ def train_main():
     
     criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    collate_fn = make_collate_fn(max_length=hyper_parameter['max_len'] -1, pad_token_id=vocab['<pad>'])
+    collate_fn = make_collate_fn(max_length=hyper_parameter['max_len'], pad_token_id=vocab['<pad>'])
     model = Performer(hyper_parameter, vocab_size=len(vocab))
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=hyper_parameter['learning_rate'])
     # dataset = PreDataset(chunked_tokenized_data)

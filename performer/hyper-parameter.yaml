@@ -1,7 +1,7 @@
 # 훈련 과정에 필요하는 hyperparameter
 batch_size: 16
 learning_rate: 0.0001   # 0.0005
-max_len: 1001
+max_len: 1000
 min_freq: 20
 num_fold: 6
 shuffle: True
@@ -15,7 +15,7 @@ weight_decay: 0.03
 n_head: 1 
 head_dim: 32 
 n_stack: 1 
-k: 32 
+r_value: 256 
 embedding_dropout: 0.2
 attention_dropout: 0.5
 ffn_dropout: 0.5
