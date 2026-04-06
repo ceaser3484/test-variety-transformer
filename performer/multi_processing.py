@@ -72,7 +72,7 @@ def __process_batch_for_vocab(chunks):
 def multi_thread_create_vocab(data, min_freq=20):
     import time
     print("multi thread create vocab start")
-    vocab = {'<pad>':0,'<sos>':1,'<eos>':2,'<unk>': 3, '<answer>': 4, '<cls>': 5, '<sep>': 6}
+    vocab = {'<pad>':0,'<sos>':1,'<eos>':2,'<unk>': 3, '<cls>': 4, '<sep>': 5}
     global_counter = Counter()
     data.sort(key=len, reverse=True)
     print("🚀 multi-processing phase start")

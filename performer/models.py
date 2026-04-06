@@ -44,18 +44,28 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, pre_query, pre_key, pre_value):
         
-        L, d = pre_query.size(1), pre_query.size(2)
+        batch_size, L, d = pre_query.size()
 
-        query = self.q_weight(pre_query)
-        key = self.k_weight(pre_key)
-        value = self.v_weight(pre_value)
+        query = self.q_weight(pre_query).view(batch_size, L, self.n_head, self.head_dim)
+        key = self.k_weight(pre_key).view(batch_size, L, self.n_head, self.head_dim)
+        value = self.v_weight(pre_value).view(batch_size, L, self.n_head, self.head_dim)
 
-        omega = self.generate_orf_matrix(self.r_value, self.d_model).to(query.device)
-        b = torch.rand((self.r_value,), device=query.device) * 2 * torch.pi
-        
+        print(f"""query: {query.size()}
+        key: {key.size()}
+        value: {value.size()}""")
+
+        omega = self.generate_orf_matrix(self.r_value, self.head_dim).to(pre_query.device)
+        print("omega size:", omega.size())
+
+        b = torch.rand(self.r_value, device=pre_query.device) * 2 * torch.pi
+        print("b size:", b.size())
+
         query_prime = self.orthogonal_random_features(query, omega, b)
         key_prime = self.orthogonal_random_features(key, omega, b)
-        print(query_prime.size(), key_prime.size())
+
+        print("query_prime size: ", query_prime.size())
+        print("key_prime size: ", key_prime.size())
+        
         exit()
 
 class FeedForwardNetwork(nn.Module):
