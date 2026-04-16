@@ -21,7 +21,7 @@ class RoPEEmbedding(nn.Module):
         return x_rotated.reshape(x.size())
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, n_head, head_dim, r_value, causal_mask=False):
+    def __init__(self, n_head, head_dim, r_value, dropout, causal_mask=False):
         super().__init__()
         self.n_head = n_head
         self.head_dim = head_dim
@@ -33,6 +33,8 @@ class MultiHeadAttention(nn.Module):
         self.k_weight = nn.Linear(self.d_model, self.d_model, bias=False)
         self.v_weight = nn.Linear(self.d_model, self.d_model, bias=False)
         self.out_weight = nn.Linear(self.d_model, self.d_model, bias=False)
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(self.d_model)
 
     def generate_orf_matrix(self, r, d):
         G = torch.randn(r, d)
@@ -83,6 +85,7 @@ class MultiHeadAttention(nn.Module):
             # print("numerator size: ", numerator.size())
 
             denominator = (query_prime * key_prefix).sum(dim=-1, keepdim=True)
+            denominator = torch.clamp(denominator, min=1e-6)  # 작은 값으로 클램프하여 안정성 확보
             # print("denominator size: ", denominator.size())
 
         else:
@@ -98,59 +101,63 @@ class MultiHeadAttention(nn.Module):
             
             # print("key_prime_sum add dim", k_prime_sum.unsqueeze(-1).size())
             denominator = torch.matmul(query_prime.transpose(1,2), k_prime_sum.unsqueeze(-1))
+            denominator = torch.clamp(denominator, min=1e-6)  # 작은 값으로 클램프하여 안정성 확보
             # print("denominator size: ", denominator.size())
 
         out = numerator / (denominator + 1e-6)
         out = out.view(batch_size, L, d_model)
         # print("out size: ", out.size())
-        result = self.out_weight(out) + pre_query
+        pre_result = self.out_weight(out)
+        result = self.norm(pre_result + pre_query)
         # print("result size: ", result.size())
         return result
 
 class FeedForwardNetwork(nn.Module):
-    def __init__(self, d_model):
+    def __init__(self, d_model, dropout):
         super().__init__()
         self.normalization = nn.LayerNorm(d_model)
         self.linear1 = nn.Linear(d_model, d_model * 4)
         self.gelu = nn.GELU()
         self.linear2 = nn.Linear(d_model * 4, d_model)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, sequence):
-        x = self.normalization(sequence)
-        x = self.linear1(x)
+        x = self.linear1(sequence)
         x = self.gelu(x)
-        x = self.linear2(x) + sequence
+        x = self.linear2(x)
+        x = self.dropout(x)
+        x = self.normalization(x + sequence)
         return x
 
 
 class EncoderBlock(nn.Module):
-    def __init__(self, n_head, head_dim, r_value):
+    def __init__(self, n_head, head_dim, r_value, att_dropout, ffn_dropout):
         super(EncoderBlock, self).__init__()
-        self.attention = MultiHeadAttention(n_head, head_dim, r_value, causal_mask=False)
-        self.ffn = FeedForwardNetwork(n_head * head_dim)
+        self.attention = MultiHeadAttention(n_head, head_dim, r_value, att_dropout, causal_mask=False)
+        self.ffn = FeedForwardNetwork(n_head * head_dim, ffn_dropout)
 
     def forward(self, sequence):
-        attention_output = self.attention(sequence, sequence, sequence)
-        ffn_output = self.ffn(attention_output)
+        attention_output = torch.utils.checkpoint.checkpoint(self.attention, sequence, sequence, sequence)
+        ffn_output = torch.utils.checkpoint.checkpoint(self.ffn, attention_output)
         return ffn_output
 
 class DecoderBlock(nn.Module):
-    def __init__(self, n_head, head_dim, r_value):
+    def __init__(self, n_head, head_dim, r_value, att_dropout, ffn_dropout):
         super(DecoderBlock, self).__init__()
-        self.attention_1 = MultiHeadAttention(n_head, head_dim, r_value, causal_mask=True)
-        self.attention_2 = MultiHeadAttention(n_head, head_dim, r_value, causal_mask=False)
-        self.fnn = FeedForwardNetwork(n_head * head_dim)
+        self.attention_1 = MultiHeadAttention(n_head, head_dim, r_value, att_dropout, causal_mask=True)
+        self.attention_2 = MultiHeadAttention(n_head, head_dim, r_value, att_dropout, causal_mask=False)
+        self.fnn = FeedForwardNetwork(n_head * head_dim, ffn_dropout)
 
-    def forward(self, sequence, encoder_output, mask=None):
-        attention_output_1 = self.attention_1(sequence, sequence, sequence)
-        attention_output_2 = self.attention_2(attention_output_1, encoder_output, encoder_output)
-        ffn_output = self.fnn(attention_output_2)
+    def forward(self, sequence, encoder_output):
+        attention_output_1 = torch.utils.checkpoint.checkpoint(self.attention_1, sequence, sequence, sequence)
+        attention_output_2 = torch.utils.checkpoint.checkpoint(self.attention_2, attention_output_1, encoder_output, encoder_output)
+        ffn_output = torch.utils.checkpoint.checkpoint(self.fnn, attention_output_2)
         return ffn_output
 
 class Encoder(nn.Module):
-    def __init__(self, n_head, head_dim, r_value, n_stack):
+    def __init__(self, n_head, head_dim, r_value, n_stack, att_dropout, ffn_dropout):
         super(Encoder, self).__init__()
-        self.blocks = nn.ModuleList([EncoderBlock(n_head, head_dim, r_value) for _ in range(n_stack)])
+        self.blocks = nn.ModuleList([EncoderBlock(n_head, head_dim, r_value, att_dropout, ffn_dropout) for _ in range(n_stack)])
     
     def forward(self, sequence):
         for block in self.blocks:
@@ -158,9 +165,9 @@ class Encoder(nn.Module):
         return sequence
 
 class Decoder(nn.Module):
-    def __init__(self, n_head, head_dim, r_value, n_stack):
+    def __init__(self, n_head, head_dim, r_value, n_stack, att_dropout, ffn_dropout):
         super(Decoder, self).__init__()
-        self.blocks = nn.ModuleList([DecoderBlock(n_head, head_dim, r_value) for _ in range(n_stack)])
+        self.blocks = nn.ModuleList([DecoderBlock(n_head, head_dim, r_value, att_dropout, ffn_dropout) for _ in range(n_stack)])
     
     def forward(self, sequence, encoder_output):
         for block in self.blocks:
@@ -174,13 +181,17 @@ class Performer(nn.Module):
         d_model = hyper_params['n_head'] * hyper_params['head_dim']
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_embedding = RoPEEmbedding(d_model)
-        self.encoder = Encoder(hyper_params['n_head'], hyper_params['head_dim'], hyper_params['r_value'], hyper_params['n_stack'])
-        self.decoder = Decoder(hyper_params['n_head'], hyper_params['head_dim'], hyper_params['r_value'], hyper_params['n_stack'])
+        self.dropout = nn.Dropout(hyper_params['embedding_dropout'])
+        self.encoder = Encoder(hyper_params['n_head'], hyper_params['head_dim'], hyper_params['r_value'], hyper_params['n_stack'],
+                               hyper_params['attention_dropout'], hyper_params['ffn_dropout'])
+        self.decoder = Decoder(hyper_params['n_head'], hyper_params['head_dim'], hyper_params['r_value'], hyper_params['n_stack'],
+                               hyper_params['attention_dropout'], hyper_params['ffn_dropout'])
         self.output_layer = nn.Linear(d_model, vocab_size)
 
     def forward(self, sequence):
         pre_sequence = self.embedding(sequence) # (batch, seq_len, d_model)
         sequence = pre_sequence + self.pos_embedding(pre_sequence)
+        sequence = self.dropout(sequence)
         encoder_output = self.encoder(sequence)
         decoder_output = self.decoder(sequence, encoder_output)
         output = self.output_layer(decoder_output)

@@ -1,21 +1,21 @@
 # 훈련 과정에 필요하는 hyperparameter
-batch_size: 2
-learning_rate: 0.0001   # 0.0005
+batch_size: 4
+learning_rate: 0.0005   # 0.0005
 max_len: 1024
 min_freq: 5
-num_fold: 6
+num_fold: 2 
 shuffle: True
 num_epochs: 20
 scheduler_gamma: 0.8
 scheduler_step_size: 10
 patience: 5
-weight_decay: 0.03
+weight_decay: 0.01
 
 # 모델 관련 hyperparameter
 n_head: 4 
-head_dim: 64 
-n_stack: 3 
+head_dim: 64
+n_stack: 5 
 r_value: 128 
 embedding_dropout: 0.2
-attention_dropout: 0.5
-ffn_dropout: 0.5
+attention_dropout: 0.2
+ffn_dropout: 0.2
