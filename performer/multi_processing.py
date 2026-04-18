@@ -72,7 +72,7 @@ def __process_batch_for_vocab(chunks):
 def multi_thread_create_vocab(data, min_freq=20):
     import time
     print("multi thread create vocab start")
-    vocab = {'<pad>':0,'<sos>':1,'<eos>':2,'<unk>': 3, '<cls>': 4, '<sep>': 5}
+    vocab = {'<pad><@>':0,'<sos><@>':1,'<eos><@>':2,'<unk><@>': 3, '<cls><@>': 4, '<sep><@>': 5}
     global_counter = Counter()
     data.sort(key=len, reverse=True)
     print("🚀 multi-processing phase start")
@@ -163,7 +163,7 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
     pid = os.getpid()
     log_file = os.path.join(log_dir, f"process_{pid}.log")
     
-    token_list = [vocab['<sos>'], vocab['<cls>']]  # 문장 시작 토큰
+    token_list = [vocab['<sos><@>'], vocab['<cls><@>']]  # 문장 시작 토큰
     sentences = kss_module.split_sentences(paragraph)
     with open(log_file, 'a', encoding='utf-8') as f:
         for sentence in sentences:
@@ -179,7 +179,7 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
                         token = f"{digit}<@>{pos}"
                         if token not in vocab or pos == "UNKNOWN":
                             f.write(f"[PID {pid}] 숫자 토큰 미스매치 \n문장 : {sentence}\n형태소: {morph}, 품사: {pos}\n생성된 토큰: {token}\n\n")
-                        token_list.append(vocab.get(token, vocab['<unk>']))
+                        token_list.append(vocab.get(token, vocab['<unk><@>']))
 
                 # 한자는 한 글자씩 분리
                 elif hanja_pattern.search(morph):
@@ -187,7 +187,7 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
                         token = f"{char}<@>SH"
                         if token not in vocab or pos == "UNKNOWN":
                             f.write(f"[PID {pid}] 한자 토큰 미스매치 \n문장 : {sentence}\n형태소: {char}, 품사: SH\n생성된 토큰: {token}\n\n")
-                        token_list.append(vocab.get(token, vocab['<unk>']))
+                        token_list.append(vocab.get(token, vocab['<unk><@>']))
 
                 # 특수문자는 하나하나씩 떼어서
                 elif symbol_pattern.search(morph):
@@ -195,11 +195,11 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
                         token = f"{char}<@>{pos}"
                         if token not in vocab:
                             f.write(f"[PID {pid}] 특수문자 토큰 미스매치 \n문장 : {sentence}\n형태소: {char}, 품사: {pos}\n생성된 토큰: {token}\n\n")
-                        token_list.append(vocab.get(token, vocab['<unk>']))
+                        token_list.append(vocab.get(token, vocab['<unk><@>']))
 
                 else:
                     if morph == "<unk>":
-                        token_list.append(vocab['<unk>'])
+                        token_list.append(vocab['<unk><@>'])
                     else:
                         if pos == "NNG" or pos == "NNP":
                             token = f"{morph}<@>noun"
@@ -207,10 +207,10 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
                             token = f"{morph}<@>{pos}"
                             if token not in vocab or pos == "UNKNOWN":
                                 f.write(f"[PID {pid}] 일반 토큰 미스매치 \n문장 : {sentence}\n형태소: {morph}, 품사: {pos}\n생성된 토큰: {token}\n\n")
-                            token_list.append(vocab.get(token, vocab['<unk>']))
+                            token_list.append(vocab.get(token, vocab['<unk><@>']))
 
-            token_list.append(vocab['<sep>'])  # 문장 종료 토큰
-        token_list.append(vocab['<eos>'])  # 문단 종료 토큰
+            token_list.append(vocab['<sep><@>'])  # 문장 종료 토큰
+        token_list.append(vocab['<eos><@>'])  # 문단 종료 토큰
 
     # max_length로 chunking
     chunked = []

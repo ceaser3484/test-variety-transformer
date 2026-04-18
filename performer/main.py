@@ -23,8 +23,16 @@ def make_collate_fn(max_length, pad_token_id):
         return train_input_padded, train_target_padded
     return collate_fn
 
+def lr_scheduler(step, warmup_steps, total_step, base_lr):
+    # warmup 단계
+    if step < warmup_steps:
+        return base_lr * step / warmup_steps
+    # cosine decay 단계
+    progress = (step - warmup_steps) / (total_step - warmup_steps)
+    return base_lr * 0.5 * (1 + math.cos(math.pi * progress))
 
-def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold_idx, epoch, accumulate_steps=10):
+
+def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold_idx, epoch, base_lr, accumulate_steps=10):
     from random import choice
     scaler = torch.amp.GradScaler('cuda')
     model.train()
@@ -34,10 +42,18 @@ def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold
     pbar = tqdm(enumerate(dataloader), total=len(dataloader), colour=colour, dynamic_ncols=True)
     sum_loss = 0.0
     optimizer.zero_grad()
+    total_steps = len(dataloader) * num_epochs
     
     for batch_idx, (train, target) in pbar:
         pbar.set_description(f"Fold {fold_idx} - Epoch {epoch+1}/{num_epochs}")
         train, target = train.to(device), target.to(device)
+
+        step = batch_idx + epoch * len(dataloader)
+
+        lr = lr_scheduler(step, 10000, total_steps, base_lr)
+    
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
 
         with torch.amp.autocast('cuda'):
 
@@ -49,11 +65,8 @@ def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold
         scaler.scale(loss).backward()
         sum_loss += loss.item()
 
-        
-        # optimizer.step()
-        # print(loss.item())
         total_loss.append(loss.item())
-        pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
+        pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{loss.item():.4f}"})
 
         if (batch_idx + 1) % accumulate_steps == 0:
             scaler.unscale_(optimizer)
@@ -62,7 +75,7 @@ def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold
             scaler.update()
             optimizer.zero_grad()
 
-        if batch_idx % 100000 == 0 and batch_idx > 0:
+        if batch_idx % 50000 == 0 and batch_idx > 0:
             torch.save({'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict()}, 
             f"../../models/performer_trainning_progress.pt")
@@ -182,9 +195,9 @@ def train_main():
         print(f"✅ 완료 - 총 {len(chunked_tokenized_data):,}개 chunks 생성")
     
     torch.set_float32_matmul_precision('high')
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad><@>'])
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    collate_fn = make_collate_fn(max_length=hyper_parameter['max_len'], pad_token_id=vocab['<pad>'])
+    collate_fn = make_collate_fn(max_length=hyper_parameter['max_len'], pad_token_id=vocab['<pad><@>'])
     model = Performer(hyper_parameter, vocab_size=len(vocab)).to(device)
     model = torch.compile(model, backend='eager')
     optimizer = torch.optim.Adafactor(model.parameters(), lr=hyper_parameter['learning_rate'], weight_decay=1e-6)
@@ -231,7 +244,7 @@ def train_main():
 
             test_inference(model, test_data, device, hyper_parameter['max_len'], reverse_vocab)
             print('\n'* 2)
-            avg_train_loss = train_loop(model, train_dataloader, criterion, optimizer, device, hyper_parameter['num_epochs'], k_idx, epoch)
+            avg_train_loss = train_loop(model, train_dataloader, criterion, optimizer, device, hyper_parameter['num_epochs'], k_idx, epoch, hyper_parameter['learning_rate'])
             train_losses.append(avg_train_loss)
             print(f"Fold {k_idx} - Average Train Loss: {avg_train_loss:.4f}")
             avg_eval_loss = eval_loop(model, eval_dataloader, criterion, device)
