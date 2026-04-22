@@ -1,6 +1,6 @@
 # 훈련 과정에 필요하는 hyperparameter
 batch_size: 4
-learning_rate: 0.0005   # 0.0005
+learning_rate: 0.00001  # 0.0005
 max_len: 1024
 min_freq: 5
 num_fold: 2 

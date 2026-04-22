@@ -1,5 +1,6 @@
 import torch
 from tqdm import tqdm
+import math
 
 def make_collate_fn(max_length, pad_token_id):
     def collate_fn(batch):
@@ -24,7 +25,9 @@ def make_collate_fn(max_length, pad_token_id):
     return collate_fn
 
 def lr_scheduler(step, warmup_steps, total_step, base_lr):
+    
     # warmup 단계
+
     if step < warmup_steps:
         return base_lr * step / warmup_steps
     # cosine decay 단계
@@ -32,11 +35,12 @@ def lr_scheduler(step, warmup_steps, total_step, base_lr):
     return base_lr * 0.5 * (1 + math.cos(math.pi * progress))
 
 
-def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold_idx, epoch, base_lr, accumulate_steps=10):
+def train_amp_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold_idx, epoch, base_lr, accumulate_steps=10):
     from random import choice
     scaler = torch.amp.GradScaler('cuda')
     model.train()
     total_loss = []
+    grad_norm = None
     
     colour = '#' + ''.join([choice('0123456789ABCDEF') for _ in range(6)])
     pbar = tqdm(enumerate(dataloader), total=len(dataloader), colour=colour, dynamic_ncols=True)
@@ -50,7 +54,7 @@ def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold
 
         step = batch_idx + epoch * len(dataloader)
 
-        lr = lr_scheduler(step, 10000, total_steps, base_lr)
+        lr = lr_scheduler(step, 20000, total_steps, base_lr)
     
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
@@ -66,14 +70,19 @@ def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold
         sum_loss += loss.item()
 
         total_loss.append(loss.item())
-        pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{loss.item():.4f}"})
+        
 
         if (batch_idx + 1) % accumulate_steps == 0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+
+            pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{sum_loss / accumulate_steps:.4f}", "grad_norm": f"{grad_norm:.4f}" if grad_norm is not None else "none"})
+            sum_loss = 0.0
+        else:
+            pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{loss.item():.4f}", "grad_norm": "accumulating"})
 
         if batch_idx % 50000 == 0 and batch_idx > 0:
             torch.save({'model_state_dict': model.state_dict(),
@@ -81,6 +90,55 @@ def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold
             f"../../models/performer_trainning_progress.pt")
 
         avg_loss = sum(total_loss) / len(total_loss)
+    print(f"Fold {fold_idx} - Epoch {epoch+1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
+    return avg_loss
+
+def train_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold_idx, epoch, base_lr, accumulate_steps=10):
+    from random import choice
+    model.train()
+    total_loss = []
+    
+    colour = '#' + ''.join([choice('0123456789ABCDEF') for _ in range(6)])
+    pbar = tqdm(enumerate(dataloader), total=len(dataloader), colour=colour, dynamic_ncols=True)
+    optimizer.zero_grad()
+    grad_norm = None
+    total_steps = len(dataloader) * num_epochs
+
+    for batch_idx, (train, target) in pbar:
+        pbar.set_description(f"Fold {fold_idx} - Epoch {epoch+1}/{num_epochs}")
+        train, target = train.to(device), target.to(device)
+
+        step = batch_idx + epoch * len(dataloader)
+        lr = lr_scheduler(step, 10000, total_steps, base_lr)
+    
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+
+        output = model(train)
+        dim = output.size(-1)
+        loss = criterion(output.view(-1, dim), target.view(-1))
+
+        # gradient accumulation
+        loss = loss / accumulate_steps
+        loss.backward()
+
+        if (batch_idx + 1) % accumulate_steps == 0:
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+
+        total_loss.append(loss.item() * accumulate_steps)  # 실제 손실값을 기록하기 위해 accumulate_steps를 곱해줌
+        pbar.set_postfix({"lr": f"{lr:.1e}", 
+                        "Loss": f"{loss.item() * accumulate_steps:.4f}", 
+                        "grad_norm": f"{grad_norm:.4f}" if grad_norm is not None else "none"})
+
+        if batch_idx % 50000 == 0 and batch_idx > 0:
+            torch.save({'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict()}, 
+            f"../../models/performer_trainning_progress.pt")
+
+            
+    avg_loss = sum(total_loss) / len(total_loss)
     print(f"Fold {fold_idx} - Epoch {epoch+1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
     return avg_loss
 
@@ -195,7 +253,7 @@ def train_main():
         print(f"✅ 완료 - 총 {len(chunked_tokenized_data):,}개 chunks 생성")
     
     torch.set_float32_matmul_precision('high')
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad><@>'])
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad><@>'], label_smoothing=0.05)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     collate_fn = make_collate_fn(max_length=hyper_parameter['max_len'], pad_token_id=vocab['<pad><@>'])
     model = Performer(hyper_parameter, vocab_size=len(vocab)).to(device)
@@ -244,7 +302,7 @@ def train_main():
 
             test_inference(model, test_data, device, hyper_parameter['max_len'], reverse_vocab)
             print('\n'* 2)
-            avg_train_loss = train_loop(model, train_dataloader, criterion, optimizer, device, hyper_parameter['num_epochs'], k_idx, epoch, hyper_parameter['learning_rate'])
+            avg_train_loss = train_amp_loop(model, train_dataloader, criterion, optimizer, device, hyper_parameter['num_epochs'], k_idx, epoch, hyper_parameter['learning_rate'])
             train_losses.append(avg_train_loss)
             print(f"Fold {k_idx} - Average Train Loss: {avg_train_loss:.4f}")
             avg_eval_loss = eval_loop(model, eval_dataloader, criterion, device)
@@ -252,7 +310,7 @@ def train_main():
             eval_losses.append(avg_eval_loss)
     
     
-    torch.save(model.state_dict(), "../../models/performer.pt")
+        torch.save(model.state_dict(), f"../../models/performer_{k_idx}.pt")
 
         
 if __name__ == '__main__':

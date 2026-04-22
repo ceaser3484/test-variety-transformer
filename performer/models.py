@@ -11,8 +11,8 @@ class RoPEEmbedding(nn.Module):
         # x: (batch, seq_len, d_model)
         seq_len = x.size(1)
         half_dim = self.d_model // 2
-        freq = torch.exp(-torch.arange(0, half_dim, dtype=torch.float32) / half_dim * log(10000)).to(x.device)
-        pos = torch.arange(seq_len, dtype=torch.float32).to(x.device)
+        freq = torch.exp(-torch.arange(0, half_dim, dtype=torch.float32, requires_grad=False) / half_dim * log(10000)).to(x.device)
+        pos = torch.arange(seq_len, dtype=torch.float32, requires_grad=False).to(x.device)
         angles = pos[:, None] * freq[None, :]
         sin, cos = angles.sin(), angles.cos()
 
