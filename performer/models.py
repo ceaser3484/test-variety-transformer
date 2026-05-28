@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from math import log
+from math import log, sqrt
 
 class RoPEEmbedding(nn.Module):
     def __init__(self, d_model):
@@ -35,36 +35,42 @@ class MultiHeadAttention(nn.Module):
         self.out_weight = nn.Linear(self.d_model, self.d_model, bias=False)
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(self.d_model)
+        
+        self.register_buffer('omega', self.generate_orf_matrix(self.r_value, self.head_dim))
+        self.register_buffer('b', torch.rand(self.r_value) * 2 * torch.pi)
 
     def generate_orf_matrix(self, r, d):
         G = torch.randn(r, d)
         Q, _ = torch.linalg.qr(G)
-        return Q
+        return Q * sqrt(d)
 
     def orthogonal_random_features(self, x, omega, b):
-        projection = x @ omega.T + b
-        return torch.sqrt(torch.tensor(2.0).to(x.device) / len(b)) * torch.cos(projection)
+        projection = ((x @ omega.T) / sqrt(self.head_dim))
+
+        x_squared = torch.sum(x ** 2, dim=-1, keepdim=True) / 2.0
+        scale = sqrt(1.0 / self.r_value)
+
+        kernel_input = projection - x_squared
+        max_val = torch.max(kernel_input, dim=-1, keepdim=True)[0]
+
+        return scale * torch.exp(kernel_input - max_val)
+
+    @torch.no_grad()
+    def reset_random_feature(self):
+        self.omega.copy_(self.generate_orf_matrix(self.r_value, self.head_dim))
+        self.b.copy_(torch.rand(self.r_value, device=self.b.device) * 2 * torch.pi)
+
 
     def forward(self, pre_query, pre_key, pre_value):
-        
+
         batch_size, L, d_model = pre_query.size()
 
         query = self.q_weight(pre_query).view(batch_size, L, self.n_head, self.head_dim)
         key = self.k_weight(pre_key).view(batch_size, L, self.n_head, self.head_dim)
         value = self.v_weight(pre_value).view(batch_size, L, self.n_head, self.head_dim)
 
-        # print(f"""query: {query.size()}
-        # key: {key.size()}
-        # value: {value.size()}""")
-
-        omega = self.generate_orf_matrix(self.r_value, self.head_dim).to(pre_query.device)
-        # print("omega size:", omega.size())
-
-        b = torch.rand(self.r_value, device=pre_query.device) * 2 * torch.pi
-        # print("b size:", b.size())
-
-        query_prime = self.orthogonal_random_features(query, omega, b)
-        key_prime = self.orthogonal_random_features(key, omega, b)
+        query_prime = self.orthogonal_random_features(query, self.omega.to(query.device), self.b.to(query.device))
+        key_prime = self.orthogonal_random_features(key, self.omega.to(key.device), self.b.to(key.device))
 
         # print("query_prime size: ", query_prime.size())
         # print("key_prime size: ", key_prime.size())
@@ -95,11 +101,12 @@ class MultiHeadAttention(nn.Module):
 
             numerator = torch.matmul(query_prime.transpose(1,2), kv)
             # print("numerator size: ", numerator.size())
-
+            
             k_prime_sum = key_prime.sum(dim=1)
             # print("k_prime_sum size: ", k_prime_sum.size())
             
             # print("key_prime_sum add dim", k_prime_sum.unsqueeze(-1).size())
+
             denominator = torch.matmul(query_prime.transpose(1,2), k_prime_sum.unsqueeze(-1))
             denominator = torch.clamp(denominator, min=1e-6)  # 작은 값으로 클램프하여 안정성 확보
             # print("denominator size: ", denominator.size())
@@ -137,8 +144,12 @@ class EncoderBlock(nn.Module):
         self.ffn = FeedForwardNetwork(n_head * head_dim, ffn_dropout)
 
     def forward(self, sequence):
-        attention_output = torch.utils.checkpoint.checkpoint(self.attention, sequence, sequence, sequence)
-        ffn_output = torch.utils.checkpoint.checkpoint(self.ffn, attention_output)
+        def custom_attention_forward(sequence):
+            return self.attention(sequence, sequence, sequence)
+
+        attention_output = torch.utils.checkpoint.checkpoint(custom_attention_forward, sequence, use_reentrant=False)
+        ffn_output = torch.utils.checkpoint.checkpoint(self.ffn, attention_output, use_reentrant=False)
+        
         return ffn_output
 
 class DecoderBlock(nn.Module):
@@ -149,9 +160,14 @@ class DecoderBlock(nn.Module):
         self.fnn = FeedForwardNetwork(n_head * head_dim, ffn_dropout)
 
     def forward(self, sequence, encoder_output):
-        attention_output_1 = torch.utils.checkpoint.checkpoint(self.attention_1, sequence, sequence, sequence)
-        attention_output_2 = torch.utils.checkpoint.checkpoint(self.attention_2, attention_output_1, encoder_output, encoder_output)
-        ffn_output = torch.utils.checkpoint.checkpoint(self.fnn, attention_output_2)
+        def custom_attention_1_forward(sequence):
+            return self.attention_1(sequence, sequence, sequence)
+        def custom_attention_2_forward(attention_output_1, encoder_output):
+            return self.attention_2(attention_output_1, encoder_output, encoder_output)
+
+        attention_output_1 = torch.utils.checkpoint.checkpoint(custom_attention_1_forward, sequence, use_reentrant=False)
+        attention_output_2 = torch.utils.checkpoint.checkpoint(custom_attention_2_forward, attention_output_1, encoder_output, use_reentrant=False)
+        ffn_output = torch.utils.checkpoint.checkpoint(self.fnn, attention_output_2, use_reentrant=False)
         return ffn_output
 
 class Encoder(nn.Module):
@@ -188,10 +204,19 @@ class Performer(nn.Module):
                                hyper_params['attention_dropout'], hyper_params['ffn_dropout'])
         self.output_layer = nn.Linear(d_model, vocab_size)
 
+    def redraw_random_features(self):
+        for block in self.encoder.blocks:
+            block.attention.reset_random_feature()
+            
+        for block in self.decoder.blocks:
+            block.attention_1.reset_random_feature()
+            block.attention_2.reset_random_feature()
+
     def forward(self, sequence):
         pre_sequence = self.embedding(sequence) # (batch, seq_len, d_model)
         sequence = pre_sequence + self.pos_embedding(pre_sequence)
         sequence = self.dropout(sequence)
+
         encoder_output = self.encoder(sequence)
         decoder_output = self.decoder(sequence, encoder_output)
         output = self.output_layer(decoder_output)

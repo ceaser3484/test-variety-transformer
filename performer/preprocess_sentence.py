@@ -22,7 +22,7 @@ def sentence_parsing_test_1():
     import numpy as np
     word_dataset = "../../../DATASET/paper-question-answer/train.csv"
     dataset = pd.read_csv(word_dataset)
-    dataset.drop(columns=['id','category'], axis=1, inplace=True)
+    dataset.drop(columns=['id','category'], inplace=True)
 
     dataset = dataset.values.flatten()
 

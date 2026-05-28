@@ -2,6 +2,8 @@ import torch
 from tqdm import tqdm
 import math
 
+global_step = 0
+
 def make_collate_fn(max_length, pad_token_id):
     def collate_fn(batch):
         train_input_list = []
@@ -41,6 +43,8 @@ def train_amp_loop(model, dataloader, criterion, optimizer, device, num_epochs, 
     model.train()
     total_loss = []
     grad_norm = None
+    print('train_amp_loop called')
+    global global_step
     
     colour = '#' + ''.join([choice('0123456789ABCDEF') for _ in range(6)])
     pbar = tqdm(enumerate(dataloader), total=len(dataloader), colour=colour, dynamic_ncols=True)
@@ -60,7 +64,6 @@ def train_amp_loop(model, dataloader, criterion, optimizer, device, num_epochs, 
             param_group['lr'] = lr
 
         with torch.amp.autocast('cuda'):
-
             output = model(train)
             dim = output.size(-1)
             loss = criterion(output.view(-1, dim), target.view(-1))
@@ -79,17 +82,21 @@ def train_amp_loop(model, dataloader, criterion, optimizer, device, num_epochs, 
             scaler.update()
             optimizer.zero_grad()
 
-            pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{sum_loss / accumulate_steps:.4f}", "grad_norm": f"{grad_norm:.4f}" if grad_norm is not None else "none"})
+            pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{sum_loss / accumulate_steps:.4f}", "grad_norm": f"{grad_norm:.4f}"})
             sum_loss = 0.0
         else:
-            pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{loss.item():.4f}", "grad_norm": "accumulating"})
+            pbar.set_postfix({"lr": f"{lr:.1e}", "Loss": f"{loss.item():.4f}", "grad_norm": f"{grad_norm:.4f}" if grad_norm is not None else "none"})
 
-        if batch_idx % 50000 == 0 and batch_idx > 0:
+        if batch_idx % 50000 == 0:
             torch.save({'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict()}, 
             f"../../models/performer_trainning_progress.pt")
-
-        avg_loss = sum(total_loss) / len(total_loss)
+        
+        global_step += 1
+        if global_step % 10000 == 0 and global_step > 0:
+            model.redraw_random_features()
+            
+    avg_loss = sum(total_loss) / len(total_loss)
     print(f"Fold {fold_idx} - Epoch {epoch+1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
     return avg_loss
 
@@ -253,7 +260,7 @@ def train_main():
         print(f"✅ 완료 - 총 {len(chunked_tokenized_data):,}개 chunks 생성")
     
     torch.set_float32_matmul_precision('high')
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad><@>'], label_smoothing=0.05)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=vocab['<pad><@>'], label_smoothing=0.1)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     collate_fn = make_collate_fn(max_length=hyper_parameter['max_len'], pad_token_id=vocab['<pad><@>'])
     model = Performer(hyper_parameter, vocab_size=len(vocab)).to(device)
