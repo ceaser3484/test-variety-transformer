@@ -72,7 +72,7 @@ def __process_batch_for_vocab(chunks):
 def multi_thread_create_vocab(data, min_freq=20):
     import time
     print("multi thread create vocab start")
-    vocab = {'<pad><@>':0,'<sos><@>':1,'<eos><@>':2,'<unk><@>': 3, '<cls><@>': 4, '<sep><@>': 5}
+    vocab = {'<pad><@>':0,'<sos><@>':1,'<eos><@>':2,'<unk><@>': 3, '<sep><@>': 4}
     global_counter = Counter()
     data.sort(key=len, reverse=True)
     print("🚀 multi-processing phase start")
@@ -163,7 +163,7 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
     pid = os.getpid()
     log_file = os.path.join(log_dir, f"process_{pid}.log")
     
-    token_list = [vocab['<sos><@>'], vocab['<cls><@>']]  # 문장 시작 토큰
+    token_list = [vocab['<sos><@>']]  # 문장 시작 토큰
     sentences = kss_module.split_sentences(paragraph)
     with open(log_file, 'a', encoding='utf-8') as f:
         for sentence in sentences:

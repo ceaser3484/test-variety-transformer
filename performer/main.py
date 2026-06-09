@@ -26,15 +26,32 @@ def make_collate_fn(max_length, pad_token_id):
         return train_input_padded, train_target_padded
     return collate_fn
 
-def lr_scheduler(step, warmup_steps, total_step, base_lr):
+def lr_scheduler(step, warmup_steps, total_step, base_lr, cycle_steps=5000):
     
     # warmup 단계
 
     if step < warmup_steps:
         return base_lr * step / warmup_steps
-    # cosine decay 단계
-    progress = (step - warmup_steps) / (total_step - warmup_steps)
-    return base_lr * 0.5 * (1 + math.cos(math.pi * progress))
+    # cosine warm restart + decay
+    step_after_warmup = step - warmup_steps
+    total_decay_steps = total_step - warmup_steps
+
+    if step_after_warmup >= total_decay_steps:
+        return base_lr * 0.01
+    
+    # 주기적 진동을 위해서 
+    cycle_progress = (step_after_warmup % cycle_steps) / cycle_steps
+
+    # decay 계산
+    decay_factor = 1.0 - (step_after_warmup / total_decay_steps)
+    decay_factor = max(decay_factor, 0.01)  # 최소 decay factor 설정
+
+    # cosine 진동 계산
+    cosine_wave = 0.5 * (1 + math.cos(2 * math.pi * cycle_progress))
+
+    cosine_wave = 0.5 * (1 + math.cos(2 * math.pi * cycle_progress))
+
+    return base_lr * cosine_wave * decay_factor
 
 
 def train_amp_loop(model, dataloader, criterion, optimizer, device, num_epochs, fold_idx, epoch, base_lr, accumulate_steps=10):
@@ -235,7 +252,7 @@ def train_main():
         if not os.path.isfile("../../pickles/vocab.pth"):
             print("📝 Vocab 생성 중...")
 
-            if os.path.exists("../../models/performer.pt"):
+            if os.path.exists("../../models/performer.pt") or os.path.exists("../../models/performer_training_progress.pt"):
                 os.remove("../../models/performer.pt")
                 os.remove("../../models/performer_trainning_progress.pt")
                 print("✅ 기존 모델 파일 삭제 완료")
