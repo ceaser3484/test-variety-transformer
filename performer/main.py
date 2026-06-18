@@ -94,7 +94,7 @@ def train_amp_loop(model, dataloader, criterion, optimizer, device, num_epochs, 
 
         if (batch_idx + 1) % accumulate_steps == 0:
             scaler.unscale_(optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -267,6 +267,7 @@ def train_main():
             print(f"✅ Vocab 생성 완료: {len(vocab):,} 토큰")
         else:
             vocab = torch.load("../../pickles/vocab.pth")
+            reverse_vocab = torch.load("../../pickles/reversed_vocab.pth")
             print(f"✅ Vocab 로드 완료: {len(vocab):,} 토큰")
 
         # Chunking & Tokenization

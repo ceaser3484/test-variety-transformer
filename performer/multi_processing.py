@@ -203,6 +203,7 @@ def __chunk_sentence(paragraph, vocab, max_length, log_dir='logs'):
                     else:
                         if pos == "NNG" or pos == "NNP":
                             token = f"{morph}<@>noun"
+                            token_list.append(vocab.get(token, vocab['<unk><@>']))
                         else:
                             token = f"{morph}<@>{pos}"
                             if token not in vocab or pos == "UNKNOWN":

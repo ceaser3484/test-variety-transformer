@@ -2,7 +2,7 @@
 batch_size: 4
 learning_rate: 0.0002  # 0.0005
 max_len: 1024
-min_freq: 5
+min_freq: -1
 num_fold: 2 
 shuffle: True
 num_epochs: 20
